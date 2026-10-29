@@ -1,0 +1,223 @@
+/**
+ * Bilingual Translation Dictionary for IT-DSS.
+ * Full support for English (LTR) and Egyptian / Standard Arabic (RTL).
+ */
+
+export type Language = 'en' | 'ar';
+
+export const translations = {
+  en: {
+    system_title: "IT-DSS Command Center",
+    system_subtitle: "Intelligent Traffic Decision Support System",
+    operational_status: "SYSTEM OPERATIONAL",
+    live_cv_feed: "Live CV Telemetry Active",
+    simulation_sandbox: "Simulation Sandbox",
+    select_corridor: "Select Arterial Corridor",
+    language_toggle: "العربية",
+
+    // Corridors
+    corridor_26july: "26th of July Corridor",
+    corridor_ring: "Ring Road - Giza Sector",
+    corridor_salah_salem: "Salah Salem Axis",
+
+    // Navigation
+    nav_workzone: "Work-Zone Advisor",
+    nav_workzone_desc: "Optimal closure windows, capacity drop & SOP",
+    nav_intersection: "Intersection Simulator",
+    nav_intersection_desc: "Signal vs U-Turn vs Roundabout vs Open",
+    nav_shockwave: "Incident Shockwave",
+    nav_shockwave_desc: "LWR backward wave speed & exit spillback",
+    nav_reversible: "Dynamic Reversible Lanes",
+    nav_reversible_desc: "5+3 barrier reallocation & Green Wave flush",
+
+    // Common Controls & Badges
+    run_simulation: "Execute Decision Engine",
+    calculating: "Computing Physics Model...",
+    reset_defaults: "Reset Defaults",
+    export_sop: "Copy SOP Directive",
+    print_sop: "Print Official Directive",
+    sop_copied: "Directive copied to clipboard!",
+    level_of_service: "Level of Service (LoS)",
+    conflict_points: "Conflict Points",
+    delay_sec: "Average Delay",
+    queue_length: "Queue Length",
+    capacity: "Effective Capacity",
+    speed: "Average Speed",
+    passengers: "Human Passengers",
+    heavy_vehicles: "Heavy Vehicle Share",
+
+    // Vehicles
+    car: "Private Car",
+    microbus: "14-Seat Microbus",
+    bus: "Transit Bus",
+    truck: "Heavy Freight Truck",
+    motorcycle: "Motorcycle",
+
+    // Module 1: Work-Zone
+    wz_title: "Highway Work-Zone & Lane Closure Advisor",
+    wz_subtitle: "Highway Capacity Manual (HCM) Capacity Reduction & Delay Minimization Engine",
+    wz_select_lanes: "Select Lanes to Close (Lane 1 = Right/Heavy, Lane 4 = Left/Fast)",
+    wz_lane: "Lane",
+    wz_duration: "Maintenance Duration (Hours)",
+    wz_day: "Day of Week",
+    wz_optimal_windows: "Top 3 Recommended Windows",
+    wz_worst_window: "Worst Operating Window (High Congestion Risk)",
+    wz_demand_vs_cap: "24-Hour Demand vs. Work-Zone Capacity Profile",
+    wz_demand_label: "Hourly PCE Demand",
+    wz_capacity_label: "Reduced Capacity",
+    wz_queue_label: "Accumulated Queue (veh)",
+    wz_person_hours: "Total Person-Hours of Delay (PHD)",
+    wz_spillback_detected: "CRITICAL: Queue will spill back into upstream exit!",
+
+    // Module 2: Intersection
+    int_title: "Intersection Signal Warrant & Alternative Simulator",
+    int_subtitle: "Multi-Alternative Geometric & Operational Decision Engine",
+    int_main_flow: "Mainline Arterial Flow (veh/h)",
+    int_cross_flow: "Cross-Street Flow (veh/h)",
+    int_turning_pct: "Turning Movement Share (%)",
+    int_heavy_pct: "Heavy Vehicles Share (%)",
+    int_uturn_dist: "Distance to Protected U-Turn Median (meters)",
+    int_recommended_solution: "Winning Engineering Recommendation",
+    int_comparison_matrix: "4-Way Geometric Performance Matrix",
+    int_open: "Uncontrolled Open Intersection",
+    int_signal: "Webster Adaptive 4-Phase Signal",
+    int_uturn: "Closed Median + Protected U-Turn (Egyptian Axis Model)",
+    int_roundabout: "Modern 3-Lane Roundabout",
+
+    // Module 3: Shockwave
+    sw_title: "Incident Shockwave & Micro-Friction Predictor",
+    sw_subtitle: "Lighthill-Whitham-Richards (LWR) Hydrodynamic Wave & Spillback Engine",
+    sw_incident_type: "Incident Classification",
+    sw_stall: "Vehicle Breakdown / Stall",
+    sw_collision: "Multi-Vehicle Collision",
+    sw_microbus_stop: "Informal Microbus Drop-off Blockage",
+    sw_blocked_lanes: "Number of Blocked Lanes",
+    sw_weaving_slider: "Microbus Lateral Weaving Index (Micro-Friction)",
+    sw_shockwave_speed: "Backward Shockwave Propagation Speed",
+    sw_countdown_label: "Countdown Until Upstream Exit Blocked",
+    sw_countdown_unit: "Minutes Remaining",
+    sw_queue_growth: "60-Minute Physical Queue Length Growth",
+    sw_micro_friction_box: "Engineering Micro-Friction Remedy",
+
+    // Module 4: Reversible & Green Wave
+    rev_title: "Dynamic Reversible Lanes & Green Wave Optimizer",
+    rev_subtitle: "Movable-Barrier Reallocation (5+3) & Progression Flush Scheduling",
+    rev_inbound_flow: "Inbound Flow to Cairo (PCE/h)",
+    rev_outbound_flow: "Outbound Flow to Suburbs (PCE/h)",
+    rev_directional_split: "Directional Split Ratio",
+    rev_comparison: "Operational Configuration Comparison",
+    rev_std_config: "Standard 4+4 Balanced Lanes",
+    rev_dynamic_config: "Dynamic Reversible 5+3 Lanes",
+    rev_travel_time_savings: "Inbound Travel Time Reduction",
+    rev_safety_margin: "Outbound Opposing Safety Margin",
+    rev_green_wave_title: "Emergency Corridor Green Wave Signal Progression Offsets",
+    rev_pre_flush_label: "Pre-Arrival Emergency Queue Flush Lead Time",
+  },
+  ar: {
+    system_title: "مركز القيادة والتحكم الذكي للمرور",
+    system_subtitle: "نظام دعم اتخاذ القرار المروري الذكي (IT-DSS)",
+    operational_status: "النظام يعمل بكفاءة",
+    live_cv_feed: "بث كاميرات الرؤية الحاسوبية مباشر",
+    simulation_sandbox: "بيئة المحاكاة التفاعلية",
+    select_corridor: "اختر المحور المروري",
+    language_toggle: "English",
+
+    // Corridors
+    corridor_26july: "محور ٢٦ يوليو (الجيزة - أكتوبر)",
+    corridor_ring: "الطريق الدائري - قطاع الجيزة",
+    corridor_salah_salem: "محور صلاح سالم (مصر الجديدة - العاصمة)",
+
+    // Navigation
+    nav_workzone: "إدارة التحويلات والعمليات",
+    nav_workzone_desc: "تحديد الفترات المثلى للصيانة وأوامر التشغيل",
+    nav_intersection: "تقييم التقاطعات والمحاور",
+    nav_intersection_desc: "مقارنة الإشارات والدوران للخلف والميادين",
+    nav_shockwave: "التنبؤ بموجات التكدس",
+    nav_shockwave_desc: "حساب سرعة ارتداد الموجة وزمن إغلاق المخارج",
+    nav_reversible: "الحارات الترددية والموجة الخضراء",
+    nav_reversible_desc: "إعادة توزيع الحارات (5+3) ومزامنة الإشارات",
+
+    // Common Controls & Badges
+    run_simulation: "تنفيذ محرك اتخاذ القرار",
+    calculating: "جاري حساب معادلات التدفق الفيزيائي...",
+    reset_defaults: "استعادة القيم الافتراضية",
+    export_sop: "نسخ أمر العمليات (SOP)",
+    print_sop: "طباعة التوجيه الميداني",
+    sop_copied: "تم نسخ توجيه العمليات بنجاح!",
+    level_of_service: "مستوى الخدمة (LoS)",
+    conflict_points: "نقاط التعارض والحوادث",
+    delay_sec: "متوسط التأخير",
+    queue_length: "طول طابور التكدس",
+    capacity: "السعة الاستيعابية الفعالة",
+    speed: "متوسط السرعة",
+    passengers: "عدد الركاب البشري",
+    heavy_vehicles: "نسبة النقل الثقيل",
+
+    // Vehicles
+    car: "سيارة ملاكي",
+    microbus: "ميكروباص 14 راكب",
+    bus: "حافلة نقل جماعي",
+    truck: "شاحنة نقل ثقيل",
+    motorcycle: "دراجة نارية",
+
+    // Module 1: Work-Zone
+    wz_title: "مستشار إغلاق الحارات وتحويلات الصيانة",
+    wz_subtitle: "محرك تقليل التأخير وحساب سعة مناطق العمل وفق الدليل الأمريكي (HCM)",
+    wz_select_lanes: "حدد الحارات المطلوب إغلاقها (الحارة 1 = اليمين/النقل، الحارة 4 = اليسار/السريع)",
+    wz_lane: "حارة",
+    wz_duration: "مدة الصيانة (بالساعات)",
+    wz_day: "يوم الأسبوع",
+    wz_optimal_windows: "أفضل 3 نوافذ زمنية موصى بها ميدانياً",
+    wz_worst_window: "أسوأ فترة تنفيذ (خطر تكدس وشلل مروري)",
+    wz_demand_vs_cap: "منحنى الطلب المروري مقابل السعة خلال 24 ساعة",
+    wz_demand_label: "حجم الطلب (م.ر/س)",
+    wz_capacity_label: "السعة المخفضة لمنطقة العمل",
+    wz_queue_label: "الطابور التراكمي المتولد (مركبة)",
+    wz_person_hours: "إجمالي ساعات التأخير البشري (PHD)",
+    wz_spillback_detected: "تحذير حرج: طابور المركبات سيمتد ليغلق المخرج السابق للمحور!",
+
+    // Module 2: Intersection
+    int_title: "محاكي تقييم بدائل التقاطعات وتحديد الجدوى",
+    int_subtitle: "المقارنة الهندسية المتزامنة للحلول المرورية ونقاط الحوادث",
+    int_main_flow: "حجم الحركة على المحور الرئيسي (مركبة/س)",
+    int_cross_flow: "حجم الحركة العرضية / الفرعية (مركبة/س)",
+    int_turning_pct: "نسبة حركات الدوران لليسار (%)",
+    int_heavy_pct: "نسبة المركبات الثقيلة (%)",
+    int_uturn_dist: "مسافة الدوران المحمي للخلف (متر)",
+    int_recommended_solution: "الحل الهندسي الأفضل الموصى بتنفيذه",
+    int_comparison_matrix: "مصفوفة مقارنة البدائل الأربعة الشاملة",
+    int_open: "تقاطع سطحي مفتوح بدون تحكم",
+    int_signal: "إشارة ضوئية ذكية رباعية الأطوار (ويبستر)",
+    int_uturn: "إلغاء التقاطع + محور دوران للخلف (نموذج المحاور)",
+    int_roundabout: "ميدان دائري حديث ثلاثي الحارات",
+
+    // Module 3: Shockwave
+    sw_title: "المتنبئ بموجات التكدس الارتدادية والاحتكاك الموضعي",
+    sw_subtitle: "نموذج الموجات الهيدروديناميكية (LWR) وحساب وقت إغلاق المخارج",
+    sw_incident_type: "تصنيف العائق المروري",
+    sw_stall: "تعطل مركبة مفاجئ",
+    sw_collision: "حادث تصادم متعدد",
+    sw_microbus_stop: "توقف عشوائي للميكروباص لتحميل الركاب",
+    sw_blocked_lanes: "عدد الحارات المعطلة",
+    sw_weaving_slider: "مؤشر المناورة والاحتكاك الجانبي للميكروباص",
+    sw_shockwave_speed: "سرعة ارتداد موجة التكدس للخلف",
+    sw_countdown_label: "العد التنازلي حتى شلل وإغلاق المخرج السابق",
+    sw_countdown_unit: "دقيقة متبقية",
+    sw_queue_growth: "النمو الزمني لطول الطابور خلال 60 دقيقة",
+    sw_micro_friction_box: "التدخل الهندسي لعلاج الاحتكاك الموضعي",
+
+    // Module 4: Reversible & Green Wave
+    rev_title: "مخطط الحارات الترددية الديناميكية والموجة الخضراء",
+    rev_subtitle: "إعادة تخصيص الحواجز (5+3) وجدولة فتح الإشارات للطوارئ والمواكب",
+    rev_inbound_flow: "التدفق للداخل نحو القاهرة (م.ر/س)",
+    rev_outbound_flow: "التدفق للخارج نحو الضواحي (م.ر/س)",
+    rev_directional_split: "نسبة التفاوت الاتجاهي في الحركة",
+    rev_comparison: "مقارنة الأداء التشغيلي للتوزيع الحركي",
+    rev_std_config: "التوزيع الثابت 4+4 حارات",
+    rev_dynamic_config: "نظام الحارة الترددية 5+3 حارات",
+    rev_travel_time_savings: "نسبة التوفير في زمن الرحلة للداخل",
+    rev_safety_margin: "هامش الأمان وسعة الاتجاه المعاكس",
+    rev_green_wave_title: "جدول فوارق توقيت الإشارات لتفعيل الموجة الخضراء",
+    rev_pre_flush_label: "زمن التفريغ المسبق للطابور قبل وصول الموكب",
+  },
+};
