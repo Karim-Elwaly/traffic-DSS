@@ -22,7 +22,7 @@ A full-stack, production-grade **Intelligent Traffic Decision Support System (IT
      3. Closed Median + Protected U-Turn Corridor (4 conflict points - Egyptian Axis Model)
      4. Modern 3-Lane Roundabout (8 conflict points)
    - **Module 3 (Incident Shockwave Predictor):** LWR backward shockwave propagation speed ($w$ km/h), urgent countdown to upstream exit blockage ($T_{\text{block}}$ minutes), 60-minute queue progression curve, and micro-friction remedies.
-   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel time savings %, and 5-intersection Green Wave signal progression offsets.
+   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel time savings %, and configurable Green Wave signal progression offsets (450 m node spacing).
 3. **Live 60fps Microscopic Canvases:**
    - `HighwayCanvas.tsx`: Animated 4-lane highway with class-colored vehicles, work-zone cones, lane merging, and shockwave queues.
    - `IntersectionCanvas.tsx`: Split-screen animated comparison between Traffic Signal stop-and-go waves and Protected U-Turn continuous flow.
@@ -41,7 +41,7 @@ For deep technical derivations and pseudocode, consult [ARCHITECTURE.md](file://
 | **Module 1: Work-Zone** | $C_{\text{wz}} = 2000 \cdot (4-n) \cdot f_{\text{merge}} \cdot f_{\text{lane}} \cdot f_{\text{HV}}$, 168h window optimizer | Top 3 optimal windows, buffer/taper, field SOP |
 | **Module 2: Intersection** | Webster optimal cycle $C_{\text{opt}}$, detour time $\Delta t_{\text{geo}}$, roundabout gap acceptance | 4-way comparison matrix & winning recommendation |
 | **Module 3: Shockwave** | LWR wave velocity $w = \|\Delta q / \Delta k\|$, exit blockage countdown $T_{\text{block}}$ | Speed gauge, red countdown, 60-min queue trajectory |
-| **Module 4: Reversible** | Split ratio $>65\%$, 5-node progression offsets $\Delta t = D / V_{\text{prog}}$ | 4+4 vs 5+3 comparison, Green Wave schedule |
+| **Module 4: Reversible** | Split ratio $>68\%$ with outbound 4+4 v/c $<0.45$, configurable-node Green Wave offsets $\Delta t = D / V_{\text{prog}}$ (450 m spacing) | 4+4 vs 5+3 comparison, Green Wave schedule |
 
 ---
 
@@ -72,11 +72,17 @@ traffic-dss-platform/
 │   │   ├── services/
 │   │   │   ├── synthetic_seeder.py    # Pre-seeds 3 Egyptian Corridors x 7d x 24h
 │   │   │   └── cv_ingestion.py        # Live YOLO/ByteTrack webhook
+│   │   ├── sumo/
+│   │   │   ├── networks/              # 4 Cairo geometric networks XML & base.sumocfg
+│   │   │   ├── generator.py           # Multi-class heterogeneous vehicle & route generator
+│   │   │   ├── runner.py              # TraCI runtime execution & microscopic metric extractor
+│   │   │   └── service.py             # Hybrid Digital Twin orchestrator & fallback
 │   │   └── api/
-│   │       └── routes.py              # 7 REST API endpoints
+│   │       └── routes.py              # REST API endpoints (HCM + SUMO Digital Twin)
 │   └── tests/
 │       ├── test_engines.py            # Pytest suite for math engines
-│       └── test_api.py                # FastAPI TestClient integration tests
+│       ├── test_api.py                # FastAPI TestClient integration tests
+│       └── test_sumo.py               # SUMO TraCI & microscopic simulation test suite
 └── frontend/
     ├── package.json
     ├── vite.config.ts                 # Vite server config (Port 5199, proxy to :8765)
@@ -125,11 +131,15 @@ docker-compose up --build
 
 ### Option 3: Manual Execution
 
-#### 1. Backend
+#### 1. Backend (from the project root)
 ```bash
-cd backend
-pip install -r requirements.txt
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8765 --reload
+python -m venv .venv
+# Windows:
+.venv\Scripts\python -m pip install -r backend/requirements.txt
+.venv\Scripts\python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8765 --reload
+# macOS / Linux:
+# source .venv/bin/activate && pip install -r backend/requirements.txt
+# python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8765 --reload
 ```
 
 #### 2. Frontend
@@ -139,11 +149,11 @@ npm install
 npm run dev
 ```
 
-#### 3. Run Automated Tests
+#### 3. Run Automated Tests (from the project root)
 ```bash
-# Mathematical Physics Test Suite
-python -m pytest backend/tests/test_engines.py -v
+# Mathematical physics, weekly optimizer, reversible thresholds, Green Wave spacing
+.venv\Scripts\python -m pytest backend/tests/test_engines.py -v
 
-# FastAPI REST Endpoints Integration Suite
-python -m pytest backend/tests/test_api.py -v
+# FastAPI REST endpoints, CV live-state ingestion, requested-window API
+.venv\Scripts\python -m pytest backend/tests/test_api.py -v
 ```

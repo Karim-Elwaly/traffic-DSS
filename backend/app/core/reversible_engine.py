@@ -75,7 +75,7 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     rev_in_time_min = (request.corridor_length_km / rev_in_speed) * 60.0
     rev_in_delay = max(0.0, (rev_in_vc - 0.75) * 220.0)
     rev_out_safety = max(0.0, (1.0 - rev_out_vc) * 100.0)
-    rev_is_viable = rev_out_vc < 0.85 and (split_pct >= 62.0 or request.emergency_mode)
+    rev_is_viable = rev_out_vc < 0.85
 
     config_rev = ReversibleConfigMetric(
         configuration_name="Dynamic Reversible 5+3 Lanes",
@@ -104,8 +104,9 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         else 0.0,
     )
 
-    # Decision Recommendation
-    if (split_pct >= 65.0 and rev_is_viable) or request.emergency_mode:
+    # Decision recommendation follows the specification:
+    # directional split > 68% AND outbound standard 4+4 v/c < 0.45 (or emergency override).
+    if ((split_pct > 68.0 and std_out_vc < 0.45 and rev_is_viable) or request.emergency_mode):
         recommended_mode = "REVERSIBLE_5_3"
     else:
         recommended_mode = "STANDARD_4_4"
@@ -113,10 +114,11 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     # -----------------------------------------------------------------------
     # Green Wave Coordination (5 Consecutive Intersections)
     # -----------------------------------------------------------------------
-    # Target progression speed = 60 km/h (16.67 m/s)
+    # Target progression speed = 60 km/h (16.67 m/s), nodes spaced at 450 m
     progression_speed_ms = 60.0 / 3.6
     cycle_length = 90.0
     green_window = 52.0
+    link_spacing_m = 450.0
 
     intersections_meta = [
         ("Axis Entrance Interchange", "تقاطع مدخل المحور"),
@@ -129,9 +131,13 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     green_wave_schedule: List[GreenWaveIntersection] = []
     cumulative_distance = 0.0
 
-    for idx, (name_en, name_ar) in enumerate(intersections_meta, start=1):
+    for idx in range(1, request.intersections_count + 1):
+        if idx <= len(intersections_meta):
+            name_en, name_ar = intersections_meta[idx - 1]
+        else:
+            name_en, name_ar = f"Corridor Signal Node {idx}", f"تقاطع المحور رقم {idx}"
         if idx > 1:
-            cumulative_distance += 480.0  # ~480 meters between nodes
+            cumulative_distance += link_spacing_m
         offset_sec = (cumulative_distance / progression_speed_ms) % cycle_length
 
         green_wave_schedule.append(
@@ -166,12 +172,13 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         )
     else:
         exec_en = (
-            f"RECOMMENDATION: MAINTAIN STANDARD 4+4 LANES. Directional split ({split_pct:.1f}%) does not meet the "
-            f"65% threshold required to warrant barrier reallocation without penalizing outbound safety."
+            f"RECOMMENDATION: MAINTAIN STANDARD 4+4 LANES. Directional split ({split_pct:.1f}%) does not exceed the "
+            f"68% activation threshold with a standard outbound v/c below 0.45, so barrier reallocation is not warranted "
+            f"without penalizing the opposing direction."
         )
         exec_ar = (
             f"توصية العمليات: الإبقاء على التوزيع المتوازن (4 حارات لكل اتجاه). نسبة التدفق ({split_pct:.1f}%) لم تتجاوز "
-            f"الحد الأدنى (65%) الذي يبرر تعديل الحواجز دون التأثير سلباً على الاتجاه المعاكس."
+            f"الحد الأدنى (68%) مع نسبة استيعاب للاتجاه المعاكس أقل من 0.45، لذا لا يبرر تعديل الحواجز حالياً."
         )
 
     return ReversibleResponse(

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<net version="1.16" junctionCornerDetail="5" limitTurnSpeed="25.00" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="0.00,0.00" convBoundary="0.00,0.00,1200.00,100.00" origBoundary="0.00,0.00,1200.00,100.00" projParameter="!"/>
+
+    <!-- Upstream Approach Edge (Lanes 0..3: Lane 1=Slow/Right, Lane 4=Fast/Left) -->
+    <edge id="E_HWY_UPSTREAM" from="J_UPSTREAM" to="J_MERGE" priority="14" numLanes="4" speed="25.00">
+        <lane id="E_HWY_UPSTREAM_0" index="0" speed="25.00" length="600.00" shape="0.00,43.90 600.00,43.90"/>
+        <lane id="E_HWY_UPSTREAM_1" index="1" speed="25.00" length="600.00" shape="0.00,47.55 600.00,47.55"/>
+        <lane id="E_HWY_UPSTREAM_2" index="2" speed="25.00" length="600.00" shape="0.00,51.20 600.00,51.20"/>
+        <lane id="E_HWY_UPSTREAM_3" index="3" speed="25.00" length="600.00" shape="0.00,54.85 600.00,54.85"/>
+    </edge>
+
+    <!-- Downstream Work-Zone Segment (Lanes 0..3 can be dynamically closed in TraCI) -->
+    <edge id="E_HWY_DOWNSTREAM" from="J_MERGE" to="J_DOWNSTREAM" priority="14" numLanes="4" speed="25.00">
+        <lane id="E_HWY_DOWNSTREAM_0" index="0" speed="25.00" length="600.00" shape="600.00,43.90 1200.00,43.90"/>
+        <lane id="E_HWY_DOWNSTREAM_1" index="1" speed="25.00" length="600.00" shape="600.00,47.55 1200.00,47.55"/>
+        <lane id="E_HWY_DOWNSTREAM_2" index="2" speed="25.00" length="600.00" shape="600.00,51.20 1200.00,51.20"/>
+        <lane id="E_HWY_DOWNSTREAM_3" index="3" speed="25.00" length="600.00" shape="600.00,54.85 1200.00,54.85"/>
+    </edge>
+
+    <!-- Junction Nodes -->
+    <junction id="J_UPSTREAM" type="dead_end" x="0.00" y="50.00" incLanes="" intLanes="" shape="0.00,56.67 0.00,42.07"/>
+    <junction id="J_MERGE" type="unregulated" x="600.00" y="50.00" incLanes="E_HWY_UPSTREAM_0 E_HWY_UPSTREAM_1 E_HWY_UPSTREAM_2 E_HWY_UPSTREAM_3" intLanes="" shape="600.00,56.67 600.00,42.07 600.00,56.67"/>
+    <junction id="J_DOWNSTREAM" type="dead_end" x="1200.00" y="50.00" incLanes="E_HWY_DOWNSTREAM_0 E_HWY_DOWNSTREAM_1 E_HWY_DOWNSTREAM_2 E_HWY_DOWNSTREAM_3" intLanes="" shape="1200.00,42.07 1200.00,56.67"/>
+
+    <!-- Through Connections (state='M') -->
+    <connection from="E_HWY_UPSTREAM" to="E_HWY_DOWNSTREAM" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from="E_HWY_UPSTREAM" to="E_HWY_DOWNSTREAM" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_HWY_UPSTREAM" to="E_HWY_DOWNSTREAM" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_HWY_UPSTREAM" to="E_HWY_DOWNSTREAM" fromLane="3" toLane="3" dir="s" state="M"/>
+</net>

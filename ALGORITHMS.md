@@ -110,6 +110,13 @@ For each hour $t \in [t_0, t_0 + D)$:
 
 ### 2.3 Optimization Search Algorithm (Pseudocode)
 
+The optimizer is evaluated at two scopes: the selected day (24 candidate start
+hours) and the full 7-day week (168 candidate start hours). Every candidate uses
+the same contiguous-window queue recursion, with demand, passenger occupancy,
+and heavy-vehicle capacity adjustments rolling across midnight and day
+boundaries. A `target_start_hour` supplied by the operations room is evaluated
+separately as a what-if window (`rank = 0`) without changing the ranking.
+
 ```python
 def optimize_workzone_schedule(request, hourly_pce, hourly_pax, hourly_hv, speed_limit, D_exit):
     n_closed = len(request.closed_lanes)
@@ -118,7 +125,7 @@ def optimize_workzone_schedule(request, hourly_pce, hourly_pax, hourly_hv, speed
     # 1. Compute effective work zone capacity
     C_wz, f_merge, f_lane, f_hv = compute_workzone_capacity(2000.0, 4, request.closed_lanes, avg(hourly_hv))
     
-    # 2. Iterate all 24 potential start hours
+    # 2. Iterate all 24 potential start hours (daily scope)
     candidates = []
     for start_h in range(24):
         queue = 0.0
@@ -148,13 +155,22 @@ def optimize_workzone_schedule(request, hourly_pce, hourly_pax, hourly_hv, speed
     candidates.sort(key=lambda x: x[0])
     top_3 = candidates[:3]
     worst = candidates[-1]
-    
-    # 3. Geometric MUTCD SOP calculus
+
+    # 3. Repeat across all 168 (day, hour) weekly candidates when a 7x24 profile exists.
+    #    Capacity is recomputed per day from that day's mean heavy-vehicle ratio.
+    weekly_candidates = evaluate_all_168_starts(weekly_pce, weekly_pax, weekly_hv, C_wz, D_exit)
+    weekly_top_3 = weekly_candidates[:3]
+    weekly_worst = weekly_candidates[-1]
+
+    # 4. Optional requested-window evaluation (target_start_hour).
+    requested = evaluate_one_window(request.target_start_hour) if request.target_start_hour is not None else None
+
+    # 5. Geometric MUTCD SOP calculus uses the weekly winner as the authoritative schedule.
     L_taper = round(0.62 * 3.65 * speed_limit * n_closed, 1)
     L_buffer = round(2.5 * speed_limit, 1)
     speed_wz = max(40.0, speed_limit - 20.0)
     
-    return top_3, worst, L_taper, L_buffer, speed_wz
+    return top_3, worst, weekly_top_3, weekly_worst, requested, L_taper, L_buffer, speed_wz
 ```
 
 ---
@@ -326,7 +342,9 @@ $$\text{Directional Split: } \text{Split}_{\text{in}} = \left(\frac{Q_{\text{in}
   * **Standard 4+4:** $C_{\text{in}} = 7,200\text{ PCE/h}$, $C_{\text{out}} = 7,200\text{ PCE/h}$.
   * **Reversible 5+3:** $C_{\text{in, rev}} = 8,850\text{ PCE/h}$, $C_{\text{out, rev}} = 5,250\text{ PCE/h}$.
 * **Warrant Criteria:**
-  $$\text{Warrant} = \left(\text{Split}_{\text{in}} \ge 65.0\% \text{ and } \frac{Q_{\text{out}}}{5250} < 0.85\right) \text{ or EmergencyMode}$$
+  $$\text{Warrant} = \left(\text{Split}_{\text{in}} > 68.0\% \text{ and } \frac{Q_{\text{out}}}{7200} < 0.45 \text{ and } \frac{Q_{\text{out}}}{5250} < 0.85\right) \text{ or EmergencyMode}$$
+  The outbound test uses the **standard 4+4** capacity (7,200 PCE/h), so the
+  opposite direction retains headroom before additional lanes are taken away.
 
 ### 5.2 Speed & Travel Time Performance
 For configuration $k$:
@@ -337,8 +355,9 @@ $$t_{\text{travel}}(k) = \left(\frac{D_{\text{corridor}}}{V_{\text{speed}}(k)}\r
 $$\text{Travel Time Saved: } \Delta t_{\%} = \max\left(0.0, \frac{t_{\text{travel}}(\text{Std}) - t_{\text{travel}}(\text{Rev})}{t_{\text{travel}}(\text{Std})} \times 100.0\right)$$
 
 ### 5.3 Green Wave Signal Progression Offsets
-Synchronizes 5 consecutive nodes along the corridor at design speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$:
+Synchronizes a configurable number of signalized nodes $N \in [1, 10]$ along the corridor at design speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$, with a fixed **450 m** link spacing between consecutive nodes:
 * **Cycle Length:** $C_{\text{cycle}} = 90.0\text{ s}$, **Green Window:** $G = 52.0\text{ s}$.
+* **Distance of Node $k$:** $D_k = (k - 1) \times 450\text{ m}$.
 * **Offset for Node $k$ at distance $D_k$ meters:**
   $$\Delta t_{\text{offset}, k} = \left(\frac{D_k}{16.67}\right) \pmod{C_{\text{cycle}}}\text{ seconds}$$
 

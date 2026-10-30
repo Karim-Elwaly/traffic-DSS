@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<net version="1.16" junctionCornerDetail="5" limitTurnSpeed="8.00" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="500.00,500.00" convBoundary="0.00,0.00,1200.00,1000.00" origBoundary="-500.00,-500.00,700.00,500.00" projParameter="!"/>
+
+    <!-- Main Axis (East-West) with Protected U-Turn loop at x=850 (350m downstream) -->
+    <!-- West to Center -->
+    <edge id="E_WEST_IN" from="J_WEST" to="J_CENTER" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_IN_0" index="0" speed="22.22" length="500.00" shape="0.00,490.40 480.00,490.40"/>
+        <lane id="E_WEST_IN_1" index="1" speed="22.22" length="500.00" shape="0.00,493.60 480.00,493.60"/>
+        <lane id="E_WEST_IN_2" index="2" speed="22.22" length="500.00" shape="0.00,496.80 480.00,496.80"/>
+    </edge>
+
+    <!-- Center to U-Turn approach -->
+    <edge id="E_CENTER_TO_UTURN" from="J_CENTER" to="J_UTURN" priority="10" numLanes="4" speed="22.22">
+        <lane id="E_CENTER_TO_UTURN_0" index="0" speed="22.22" length="350.00" shape="520.00,490.40 850.00,490.40"/>
+        <lane id="E_CENTER_TO_UTURN_1" index="1" speed="22.22" length="350.00" shape="520.00,493.60 850.00,493.60"/>
+        <lane id="E_CENTER_TO_UTURN_2" index="2" speed="22.22" length="350.00" shape="520.00,496.80 850.00,496.80"/>
+        <lane id="E_CENTER_TO_UTURN_3" index="3" speed="16.67" length="350.00" shape="520.00,500.00 850.00,500.00"/> <!-- Dedicated U-Turn deceleration pocket -->
+    </edge>
+
+    <!-- U-Turn to East Outbound -->
+    <edge id="E_EAST_OUT" from="J_UTURN" to="J_EAST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_OUT_0" index="0" speed="22.22" length="350.00" shape="880.00,490.40 1200.00,490.40"/>
+        <lane id="E_EAST_OUT_1" index="1" speed="22.22" length="350.00" shape="880.00,493.60 1200.00,493.60"/>
+        <lane id="E_EAST_OUT_2" index="2" speed="22.22" length="350.00" shape="880.00,496.80 1200.00,496.80"/>
+    </edge>
+
+    <!-- East Inbound -->
+    <edge id="E_EAST_IN" from="J_EAST" to="J_UTURN" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_IN_0" index="0" speed="22.22" length="350.00" shape="1200.00,509.60 880.00,509.60"/>
+        <lane id="E_EAST_IN_1" index="1" speed="22.22" length="350.00" shape="1200.00,506.40 880.00,506.40"/>
+        <lane id="E_EAST_IN_2" index="2" speed="22.22" length="350.00" shape="1200.00,503.20 880.00,503.20"/>
+    </edge>
+
+    <!-- U-Turn Returning Westbound to Center -->
+    <edge id="E_UTURN_TO_CENTER" from="J_UTURN" to="J_CENTER" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_UTURN_TO_CENTER_0" index="0" speed="22.22" length="350.00" shape="850.00,509.60 520.00,509.60"/>
+        <lane id="E_UTURN_TO_CENTER_1" index="1" speed="22.22" length="350.00" shape="850.00,506.40 520.00,506.40"/>
+        <lane id="E_UTURN_TO_CENTER_2" index="2" speed="22.22" length="350.00" shape="850.00,503.20 520.00,503.20"/>
+    </edge>
+
+    <!-- Center to West -->
+    <edge id="E_WEST_OUT" from="J_CENTER" to="J_WEST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_OUT_0" index="0" speed="22.22" length="500.00" shape="480.00,509.60 0.00,509.60"/>
+        <lane id="E_WEST_OUT_1" index="1" speed="22.22" length="500.00" shape="480.00,506.40 0.00,506.40"/>
+        <lane id="E_WEST_OUT_2" index="2" speed="22.22" length="500.00" shape="480.00,503.20 0.00,503.20"/>
+    </edge>
+
+    <!-- Cross Street: Right turns only at J_CENTER into main avenue -->
+    <!-- South to Center (Forced Right onto Eastbound) -->
+    <edge id="E_SOUTH_IN" from="J_SOUTH" to="J_CENTER" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_IN_0" index="0" speed="13.89" length="500.00" shape="504.80,0.00 504.80,480.00"/>
+        <lane id="E_SOUTH_IN_1" index="1" speed="13.89" length="500.00" shape="501.60,0.00 501.60,480.00"/>
+    </edge>
+
+    <!-- North to Center (Forced Right onto Westbound) -->
+    <edge id="E_NORTH_IN" from="J_NORTH" to="J_CENTER" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_IN_0" index="0" speed="13.89" length="500.00" shape="495.20,1000.00 495.20,520.00"/>
+        <lane id="E_NORTH_IN_1" index="1" speed="13.89" length="500.00" shape="498.40,1000.00 498.40,520.00"/>
+    </edge>
+
+    <!-- Outlets -->
+    <edge id="E_NORTH_OUT" from="J_CENTER" to="J_NORTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_OUT_0" index="0" speed="13.89" length="500.00" shape="504.80,520.00 504.80,1000.00"/>
+        <lane id="E_NORTH_OUT_1" index="1" speed="13.89" length="500.00" shape="501.60,520.00 501.60,1000.00"/>
+    </edge>
+    <edge id="E_SOUTH_OUT" from="J_CENTER" to="J_SOUTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_OUT_0" index="0" speed="13.89" length="500.00" shape="495.20,480.00 495.20,0.00"/>
+        <lane id="E_SOUTH_OUT_1" index="1" speed="13.89" length="500.00" shape="498.40,480.00 498.40,0.00"/>
+    </edge>
+
+    <!-- Junctions -->
+    <junction id="J_WEST" type="dead_end" x="0.00" y="500.00" incLanes="E_WEST_OUT_0 E_WEST_OUT_1 E_WEST_OUT_2" intLanes="" shape="0.00,500.00 0.00,488.80 0.00,511.20"/>
+    <junction id="J_EAST" type="dead_end" x="1200.00" y="500.00" incLanes="E_EAST_OUT_0 E_EAST_OUT_1 E_EAST_OUT_2" intLanes="" shape="1200.00,500.00 1200.00,511.20 1200.00,488.80"/>
+    <junction id="J_NORTH" type="dead_end" x="500.00" y="1000.00" incLanes="E_NORTH_OUT_0 E_NORTH_OUT_1" intLanes="" shape="500.00,1000.00 493.60,1000.00 506.40,1000.00"/>
+    <junction id="J_SOUTH" type="dead_end" x="500.00" y="0.00" incLanes="E_SOUTH_OUT_0 E_SOUTH_OUT_1" intLanes="" shape="500.00,0.00 506.40,0.00 493.60,0.00"/>
+
+    <!-- Center Junction (Median Closed with Jersey Barrier, Right Turns Only into Mainline) -->
+    <junction id="J_CENTER" type="unregulated" x="500.00" y="500.00" incLanes="E_WEST_IN_0 E_WEST_IN_1 E_WEST_IN_2 E_UTURN_TO_CENTER_0 E_UTURN_TO_CENTER_1 E_UTURN_TO_CENTER_2 E_SOUTH_IN_0 E_SOUTH_IN_1 E_NORTH_IN_0 E_NORTH_IN_1" intLanes="" shape="480.00,511.20 480.00,488.80 520.00,488.80 520.00,511.20"/>
+
+    <!-- Protected U-Turn Junction at x=865 (Median opening loop) -->
+    <junction id="J_UTURN" type="unregulated" x="865.00" y="500.00" incLanes="E_CENTER_TO_UTURN_0 E_CENTER_TO_UTURN_1 E_CENTER_TO_UTURN_2 E_CENTER_TO_UTURN_3 E_EAST_IN_0 E_EAST_IN_1 E_EAST_IN_2" intLanes="" shape="850.00,511.20 850.00,488.80 880.00,488.80 880.00,511.20"/>
+
+    <!-- Center Junction Connections: Continuous Through + Merge from Cross -->
+    <connection from="E_WEST_IN" to="E_CENTER_TO_UTURN" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from="E_WEST_IN" to="E_CENTER_TO_UTURN" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_WEST_IN" to="E_CENTER_TO_UTURN" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_SOUTH_IN" to="E_CENTER_TO_UTURN" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_SOUTH_IN" to="E_CENTER_TO_UTURN" fromLane="1" toLane="1" dir="r" state="M"/>
+
+    <connection from="E_UTURN_TO_CENTER" to="E_WEST_OUT" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from="E_UTURN_TO_CENTER" to="E_WEST_OUT" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_UTURN_TO_CENTER" to="E_WEST_OUT" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_NORTH_IN" to="E_WEST_OUT" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_NORTH_IN" to="E_WEST_OUT" fromLane="1" toLane="1" dir="r" state="M"/>
+
+    <!-- U-Turn Connections: Through traffic continues to East; Pocket lane 3 loops back West -->
+    <connection from="E_CENTER_TO_UTURN" to="E_EAST_OUT" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from="E_CENTER_TO_UTURN" to="E_EAST_OUT" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_CENTER_TO_UTURN" to="E_EAST_OUT" fromLane="2" toLane="2" dir="s" state="M"/>
+    <!-- Protected U-Turn loop from Lane 3 into westbound Lane 2 -->
+    <connection from="E_CENTER_TO_UTURN" to="E_UTURN_TO_CENTER" fromLane="3" toLane="2" dir="t" state="M"/>
+
+    <connection from="E_EAST_IN" to="E_UTURN_TO_CENTER" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from="E_EAST_IN" to="E_UTURN_TO_CENTER" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_EAST_IN" to="E_UTURN_TO_CENTER" fromLane="2" toLane="1" dir="s" state="M"/>
+</net>

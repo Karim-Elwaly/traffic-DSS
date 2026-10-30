@@ -64,6 +64,8 @@ class WorkZoneRequest(BaseModel):
     duration_hours: int = Field(default=4, ge=1, le=12)
     day_of_week: int = Field(default=0, ge=0, le=6)
     target_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    engine_mode: str = Field(default="analytical", description="'analytical' | 'sumo'")
+    simulation_duration_sec: int = Field(default=60, ge=10, le=900)
 
 
 class HourlyWorkZoneDetail(BaseModel):
@@ -81,6 +83,8 @@ class HourlyWorkZoneDetail(BaseModel):
 class WindowOption(BaseModel):
     start_hour: int
     end_hour: int
+    day_of_week: Optional[int] = None
+    end_day_of_week: Optional[int] = None
     total_person_hours_delay: float
     max_queue_length_m: float
     has_spillback: bool
@@ -114,7 +118,11 @@ class WorkZoneResponse(BaseModel):
     hourly_curves: List[HourlyWorkZoneDetail]
     optimal_windows: List[WindowOption]
     worst_window: WindowOption
+    weekly_optimal_windows: List[WindowOption] = Field(default_factory=list)
+    weekly_worst_window: Optional[WindowOption] = None
+    requested_window: Optional[WindowOption] = None
     sop: WorkZoneSOP
+    sumo_metrics: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +135,16 @@ class IntersectionRequest(BaseModel):
     turning_pct: float = Field(default=18.0, ge=5.0, le=45.0, description="Turning movement percentage")
     heavy_pct: float = Field(default=12.0, ge=2.0, le=40.0, description="Heavy vehicle percentage")
     uturn_distance_m: float = Field(default=450.0, ge=150.0, le=1000.0, description="Distance to U-turn median opening in meters")
+    engine_mode: str = Field(default="analytical", description="'analytical' | 'sumo'")
+    simulation_duration_sec: int = Field(default=300, ge=10, le=900, description="Simulation duration in seconds")
+
+
+class SumoMicroscopicMetrics(BaseModel):
+    simulated_vehicles_count: int
+    total_time_loss_sec: float
+    mean_speed_kmh: float
+    co2_emissions_kg_h: float
+    fuel_consumption_liters_h: float
 
 
 class IntersectionAlternative(BaseModel):
@@ -142,6 +160,7 @@ class IntersectionAlternative(BaseModel):
     spillback_risk: bool
     safety_index_pct: float
     estimated_throughput_pce: float
+    sumo_metrics: Optional[SumoMicroscopicMetrics] = None
 
 
 class IntersectionResponse(BaseModel):
@@ -152,6 +171,7 @@ class IntersectionResponse(BaseModel):
     recommendation_rationale_ar: str
     executive_takeaway_en: str
     executive_takeaway_ar: str
+    engine_used: str = "HCM-Analytical"
 
 
 # ---------------------------------------------------------------------------
@@ -161,9 +181,12 @@ class IntersectionResponse(BaseModel):
 class ShockwaveRequest(BaseModel):
     corridor_id: str = "corridor_26july"
     hour: int = Field(default=8, ge=0, le=23)
+    day_of_week: int = Field(default=0, ge=0, le=6)
     blocked_lanes: int = Field(default=2, ge=1, le=3)
     incident_type: str = Field(default="COLLISION", description="STALL | COLLISION | MICROBUS_STOP")
     weaving_index: float = Field(default=0.45, ge=0.0, le=1.0)
+    engine_mode: str = Field(default="analytical", description="'analytical' | 'sumo'")
+    simulation_duration_sec: int = Field(default=60, ge=10, le=600)
 
 
 class QueueProgressionStep(BaseModel):
@@ -198,6 +221,8 @@ class ShockwaveResponse(BaseModel):
     is_spillback_imminent: bool
     queue_progression: List[QueueProgressionStep]
     sop: ShockwaveSOP
+    engine_used: str = "LWR Hydrodynamic & HCM"
+    sumo_metrics: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +235,7 @@ class ReversibleRequest(BaseModel):
     outbound_flow: float = Field(default=2200.0, ge=500.0, le=7000.0)
     corridor_length_km: float = Field(default=8.5, ge=1.0, le=25.0)
     emergency_mode: bool = False
+    intersections_count: int = Field(default=5, ge=1, le=10, description="Number of signalized nodes in the Green Wave corridor")
 
 
 class ReversibleConfigMetric(BaseModel):
@@ -268,10 +294,10 @@ class CVIngestLaneFeed(BaseModel):
 
 
 class CVIngestRequest(BaseModel):
-    camera_id: str
-    corridor_id: str
+    camera_id: str = Field(min_length=1)
+    corridor_id: str = Field(min_length=1)
     timestamp_epoch: Optional[float] = None
-    lanes: List[CVIngestLaneFeed]
+    lanes: List[CVIngestLaneFeed] = Field(min_length=1, max_length=4)
 
 
 class CVIngestResponse(BaseModel):
@@ -280,4 +306,7 @@ class CVIngestResponse(BaseModel):
     processed_lanes: int
     total_instantaneous_pce: float
     total_instantaneous_passengers: float
+    state_updated: bool = False
+    telemetry_day_of_week: Optional[int] = None
+    telemetry_hour: Optional[int] = None
     message: str

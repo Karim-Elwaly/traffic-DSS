@@ -303,7 +303,7 @@ $$\text{Directional Split: } \text{Split}_{\text{in}} = \left(\frac{Q_{\text{inb
 * **Dynamic Reversible 5+3 Allocation:**
   $$C_{\text{in, rev}} = 8850\text{ PCE/h}, \quad C_{\text{out, rev}} = 5250\text{ PCE/h}$$
 * **Reversible Activation Warrant:**
-  $$\text{Warrant} = \left(\text{Split}_{\text{in}} \ge 65.0\% \text{ and } \frac{Q_{\text{outbound}}}{5250} < 0.85\right) \text{ or } \text{EmergencyMode}$$
+  $$\text{Warrant} = \left(\text{Split}_{\text{in}} > 68.0\% \text{ and } \frac{Q_{\text{outbound}}}{7200} < 0.45 \text{ and } \frac{Q_{\text{outbound}}}{5250} < 0.85\right) \text{ or } \text{EmergencyMode}$$
 
 #### Step 2: Speed-Flow Degradation Calculus
 For configuration $k \in \{\text{Standard}, \text{Reversible}\}$:
@@ -313,9 +313,10 @@ $$t_{\text{travel}}(k) = \left(\frac{D_{\text{corridor\_km}}}{V_{\text{in}}(k)}\
 $$\text{Travel Time Savings: } \Delta t_{\%} = \max\left(0.0, \frac{t_{\text{travel}}(\text{Standard}) - t_{\text{travel}}(\text{Reversible})}{t_{\text{travel}}(\text{Standard})} \times 100.0\right)$$
 
 #### Step 3: Green Wave Signal Progression Offsets
-Calculates dynamic signal progression offsets across 5 synchronized intersections at target arterial progression speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$:
+Calculates dynamic signal progression offsets across a configurable number of synchronized intersections $N \in [1, 10]$ at target arterial progression speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$ and fixed 450 m spacing:
 * **Cycle Length:** $C_{\text{cycle}} = 90.0\text{ sec}$.
 * **Green Window:** $G_{\text{window}} = 52.0\text{ sec}$.
+* **Distance of Node $k$:** $D_k = (k - 1) \times 450\text{ m}$.
 * **Intersection Offset for Node $k$ at distance $D_k$ meters:**
   $$\Delta t_{\text{offset}, k} = \left(\frac{D_k}{16.67}\right) \pmod{C_{\text{cycle}}}\text{ seconds}$$
 

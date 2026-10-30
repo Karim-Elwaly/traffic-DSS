@@ -85,16 +85,18 @@ def _get_hourly_demand_factor(hour: int, day_of_week: int) -> float:
     ]
     factor = base_curve[hour]
 
-    # Thursday (day 4): extra evening surge
+    # Thursday (day 4): weekend-eve evening surge extending into the night
     if day_of_week == 4 and 19 <= hour <= 23:
-        factor = min(1.0, factor * 1.18)
+        factor = min(1.0, factor * 1.35)
 
-    # Friday (day 5): lower morning rush, heavy afternoon/night surge
+    # Friday (day 5): lower morning rush, heavy afternoon and late-night surge
     if day_of_week == 5:
         if 6 <= hour <= 11:
             factor *= 0.45
         elif 14 <= hour <= 22:
             factor = min(1.0, factor * 1.15)
+        elif 0 <= hour <= 1:
+            factor = min(1.0, factor * 1.50)
 
     return factor
 

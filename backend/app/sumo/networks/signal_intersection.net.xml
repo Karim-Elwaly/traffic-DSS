@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<net version="1.16" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="500.00,500.00" convBoundary="0.00,0.00,1000.00,1000.00" origBoundary="-500.00,-500.00,500.00,500.00" projParameter="!"/>
+
+    <!-- Approaches -->
+    <!-- West to Center -->
+    <edge id="E_WEST_IN" from="J_WEST" to="J_CENTER" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_IN_0" index="0" speed="22.22" length="500.00" shape="0.00,490.40 480.00,490.40"/>
+        <lane id="E_WEST_IN_1" index="1" speed="22.22" length="500.00" shape="0.00,493.60 480.00,493.60"/>
+        <lane id="E_WEST_IN_2" index="2" speed="22.22" length="500.00" shape="0.00,496.80 480.00,496.80"/>
+    </edge>
+    <!-- Center to East -->
+    <edge id="E_EAST_OUT" from="J_CENTER" to="J_EAST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_OUT_0" index="0" speed="22.22" length="500.00" shape="520.00,490.40 1000.00,490.40"/>
+        <lane id="E_EAST_OUT_1" index="1" speed="22.22" length="500.00" shape="520.00,493.60 1000.00,493.60"/>
+        <lane id="E_EAST_OUT_2" index="2" speed="22.22" length="500.00" shape="520.00,496.80 1000.00,496.80"/>
+    </edge>
+
+    <!-- East to Center -->
+    <edge id="E_EAST_IN" from="J_EAST" to="J_CENTER" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_IN_0" index="0" speed="22.22" length="500.00" shape="1000.00,509.60 520.00,509.60"/>
+        <lane id="E_EAST_IN_1" index="1" speed="22.22" length="500.00" shape="1000.00,506.40 520.00,506.40"/>
+        <lane id="E_EAST_IN_2" index="2" speed="22.22" length="500.00" shape="1000.00,503.20 520.00,503.20"/>
+    </edge>
+    <!-- Center to West -->
+    <edge id="E_WEST_OUT" from="J_CENTER" to="J_WEST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_OUT_0" index="0" speed="22.22" length="500.00" shape="480.00,509.60 0.00,509.60"/>
+        <lane id="E_WEST_OUT_1" index="1" speed="22.22" length="500.00" shape="480.00,506.40 0.00,506.40"/>
+        <lane id="E_WEST_OUT_2" index="2" speed="22.22" length="500.00" shape="480.00,503.20 0.00,503.20"/>
+    </edge>
+
+    <!-- South to Center -->
+    <edge id="E_SOUTH_IN" from="J_SOUTH" to="J_CENTER" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_IN_0" index="0" speed="13.89" length="500.00" shape="504.80,0.00 504.80,480.00"/>
+        <lane id="E_SOUTH_IN_1" index="1" speed="13.89" length="500.00" shape="501.60,0.00 501.60,480.00"/>
+    </edge>
+    <!-- Center to North -->
+    <edge id="E_NORTH_OUT" from="J_CENTER" to="J_NORTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_OUT_0" index="0" speed="13.89" length="500.00" shape="504.80,520.00 504.80,1000.00"/>
+        <lane id="E_NORTH_OUT_1" index="1" speed="13.89" length="500.00" shape="501.60,520.00 501.60,1000.00"/>
+    </edge>
+
+    <!-- North to Center -->
+    <edge id="E_NORTH_IN" from="J_NORTH" to="J_CENTER" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_IN_0" index="0" speed="13.89" length="500.00" shape="495.20,1000.00 495.20,520.00"/>
+        <lane id="E_NORTH_IN_1" index="1" speed="13.89" length="500.00" shape="498.40,1000.00 498.40,520.00"/>
+    </edge>
+    <!-- Center to South -->
+    <edge id="E_SOUTH_OUT" from="J_CENTER" to="J_SOUTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_OUT_0" index="0" speed="13.89" length="500.00" shape="495.20,480.00 495.20,0.00"/>
+        <lane id="E_SOUTH_OUT_1" index="1" speed="13.89" length="500.00" shape="498.40,480.00 498.40,0.00"/>
+    </edge>
+
+    <!-- Junctions -->
+    <junction id="J_WEST" type="dead_end" x="0.00" y="500.00" incLanes="E_WEST_OUT_0 E_WEST_OUT_1 E_WEST_OUT_2" intLanes="" shape="0.00,500.00 0.00,488.80 0.00,511.20"/>
+    <junction id="J_EAST" type="dead_end" x="1000.00" y="500.00" incLanes="E_EAST_OUT_0 E_EAST_OUT_1 E_EAST_OUT_2" intLanes="" shape="1000.00,500.00 1000.00,511.20 1000.00,488.80"/>
+    <junction id="J_NORTH" type="dead_end" x="500.00" y="1000.00" incLanes="E_NORTH_OUT_0 E_NORTH_OUT_1" intLanes="" shape="500.00,1000.00 493.60,1000.00 506.40,1000.00"/>
+    <junction id="J_SOUTH" type="dead_end" x="500.00" y="0.00" incLanes="E_SOUTH_OUT_0 E_SOUTH_OUT_1" intLanes="" shape="500.00,0.00 506.40,0.00 493.60,0.00"/>
+
+    <!-- Center Junction is Traffic Light Controlled (J_CENTER with 16 link logic positions) -->
+    <junction id="J_CENTER" type="traffic_light" x="500.00" y="500.00" incLanes="E_NORTH_IN_0 E_NORTH_IN_1 E_EAST_IN_0 E_EAST_IN_1 E_EAST_IN_2 E_SOUTH_IN_0 E_SOUTH_IN_1 E_WEST_IN_0 E_WEST_IN_1 E_WEST_IN_2" intLanes="" shape="493.60,520.00 506.40,520.00 520.00,511.20 520.00,488.80 506.40,480.00 493.60,480.00 480.00,488.80 480.00,511.20">
+        <request index="0"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="1"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="2"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="3"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="4"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="5"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="6"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="7"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="8"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="9"  response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="10" response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="11" response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="12" response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="13" response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="14" response="0000000000000000" foes="0000000000000000" cont="0"/>
+        <request index="15" response="0000000000000000" foes="0000000000000000" cont="0"/>
+    </junction>
+
+    <!-- Webster Adaptive 4-Phase Traffic Light Logic (16 controlled movement links) -->
+    <tlLogic id="J_CENTER" type="static" programID="webster_actuated" offset="0">
+        <!-- Phase 0: East-West Main Green (45 sec) -->
+        <phase duration="45" state="rrrrrrGGGGGGGGGG"/>
+        <!-- Phase 1: East-West Yellow (4 sec) -->
+        <phase duration="4"  state="rrrrrryyyyyyyyyy"/>
+        <!-- Phase 2: All Red Clearance (2 sec) -->
+        <phase duration="2"  state="rrrrrrrrrrrrrrrr"/>
+        <!-- Phase 3: North-South Cross Green (25 sec) -->
+        <phase duration="25" state="GGGGGGrrrrrrrrrr"/>
+        <!-- Phase 4: North-South Yellow (4 sec) -->
+        <phase duration="4"  state="yyyyyyrrrrrrrrrr"/>
+        <!-- Phase 5: All Red Clearance (2 sec) -->
+        <phase duration="2"  state="rrrrrrrrrrrrrrrr"/>
+    </tlLogic>
+
+    <!-- Signal Controlled Connections (links 0..15 with state="o") -->
+    <!-- North Approach (Links 0..2) -->
+    <connection from="E_NORTH_IN" to="E_WEST_OUT" fromLane="0" toLane="0" dir="r" state="o" tl="J_CENTER" linkIndex="0"/>
+    <connection from="E_NORTH_IN" to="E_SOUTH_OUT" fromLane="1" toLane="1" dir="s" state="o" tl="J_CENTER" linkIndex="1"/>
+    <connection from="E_NORTH_IN" to="E_EAST_OUT" fromLane="1" toLane="2" dir="l" state="o" tl="J_CENTER" linkIndex="2"/>
+
+    <!-- South Approach (Links 3..5) -->
+    <connection from="E_SOUTH_IN" to="E_EAST_OUT" fromLane="0" toLane="0" dir="r" state="o" tl="J_CENTER" linkIndex="3"/>
+    <connection from="E_SOUTH_IN" to="E_NORTH_OUT" fromLane="1" toLane="1" dir="s" state="o" tl="J_CENTER" linkIndex="4"/>
+    <connection from="E_SOUTH_IN" to="E_WEST_OUT" fromLane="1" toLane="2" dir="l" state="o" tl="J_CENTER" linkIndex="5"/>
+
+    <!-- West Mainline Approach (Links 6..10) -->
+    <connection from="E_WEST_IN" to="E_SOUTH_OUT" fromLane="0" toLane="0" dir="r" state="o" tl="J_CENTER" linkIndex="6"/>
+    <connection from="E_WEST_IN" to="E_EAST_OUT" fromLane="0" toLane="0" dir="s" state="o" tl="J_CENTER" linkIndex="7"/>
+    <connection from="E_WEST_IN" to="E_EAST_OUT" fromLane="1" toLane="1" dir="s" state="o" tl="J_CENTER" linkIndex="8"/>
+    <connection from="E_WEST_IN" to="E_EAST_OUT" fromLane="2" toLane="2" dir="s" state="o" tl="J_CENTER" linkIndex="9"/>
+    <connection from="E_WEST_IN" to="E_NORTH_OUT" fromLane="2" toLane="1" dir="l" state="o" tl="J_CENTER" linkIndex="10"/>
+
+    <!-- East Mainline Approach (Links 11..15) -->
+    <connection from="E_EAST_IN" to="E_NORTH_OUT" fromLane="0" toLane="0" dir="r" state="o" tl="J_CENTER" linkIndex="11"/>
+    <connection from="E_EAST_IN" to="E_WEST_OUT" fromLane="0" toLane="0" dir="s" state="o" tl="J_CENTER" linkIndex="12"/>
+    <connection from="E_EAST_IN" to="E_WEST_OUT" fromLane="1" toLane="1" dir="s" state="o" tl="J_CENTER" linkIndex="13"/>
+    <connection from="E_EAST_IN" to="E_WEST_OUT" fromLane="2" toLane="2" dir="s" state="o" tl="J_CENTER" linkIndex="14"/>
+    <connection from="E_EAST_IN" to="E_SOUTH_OUT" fromLane="2" toLane="1" dir="l" state="o" tl="J_CENTER" linkIndex="15"/>
+</net>

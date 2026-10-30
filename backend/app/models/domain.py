@@ -4,7 +4,7 @@ Uses SQLModel (SQLAlchemy + Pydantic) for zero-config SQLite persistence.
 """
 
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlmodel import SQLModel, Field
 
 
@@ -24,7 +24,7 @@ class Corridor(SQLModel, table=True):
     base_capacity_per_lane: float = Field(default=2000.0)  # PCE/h/lane
     description_en: Optional[str] = None
     description_ar: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class HourlyTelemetry(SQLModel, table=True):
@@ -55,7 +55,7 @@ class HourlyTelemetry(SQLModel, table=True):
     # Calculated metrics
     pce_flow: float = Field(default=0.0)         # Passenger Car Equivalents / hr
     passenger_flow: float = Field(default=0.0)   # Total human passengers / hr
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class IncidentAudit(SQLModel, table=True):
@@ -67,7 +67,7 @@ class IncidentAudit(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     module_type: str = Field(index=True)  # WORKZONE, INTERSECTION, SHOCKWAVE, REVERSIBLE
     corridor_id: str = Field(index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     parameters_json: str
     decision_summary_en: str
     decision_summary_ar: str

@@ -58,8 +58,10 @@ def predict_incident_shockwave(
     k_jam = 145.0 * total_lanes  # 580.0 veh/km
 
     # 3. LWR Backward Shockwave Speed
+    # Upstream density cannot physically exceed jam density.
+    effective_k1 = min(k1, k_jam * 0.95)
     if q1 > q2:
-        w_speed_kmh = abs((q2 - q1) / max(10.0, (k_jam - k1)))
+        w_speed_kmh = abs((q2 - q1) / max(10.0, (k_jam - effective_k1)))
     else:
         w_speed_kmh = 0.0
 

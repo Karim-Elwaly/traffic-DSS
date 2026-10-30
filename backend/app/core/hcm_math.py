@@ -68,28 +68,28 @@ def compute_passenger_flow(
 
 def calculate_los(average_delay_sec: float, v_c_ratio: float = 0.0) -> str:
     """
-    Evaluates Highway Capacity Manual Level of Service (LoS Grade A through F).
-    - Grade A: d <= 10s and v/c <= 0.60
-    - Grade B: 10 < d <= 20s and v/c <= 0.70
-    - Grade C: 20 < d <= 35s and v/c <= 0.80
-    - Grade D: 35 < d <= 55s and v/c <= 0.90
-    - Grade E: 55 < d <= 80s and v/c <= 1.00
+    Evaluates Highway Capacity Manual Level of Service (LoS Grade A through F)
+    using the project specification thresholds:
+    - Grade A: d <= 10s
+    - Grade B: 10 < d <= 20s
+    - Grade C: 20 < d <= 35s
+    - Grade D: 35 < d <= 55s
+    - Grade E: 55 < d <= 80s
     - Grade F: d > 80s or v/c > 1.0
     """
     if v_c_ratio > 1.0 or average_delay_sec > 80.0:
         return "F"
-    elif average_delay_sec <= 10.0 and v_c_ratio <= 0.60:
+    if average_delay_sec <= 10.0:
         return "A"
-    elif average_delay_sec <= 20.0 and v_c_ratio <= 0.70:
+    if average_delay_sec <= 20.0:
         return "B"
-    elif average_delay_sec <= 35.0 and v_c_ratio <= 0.80:
+    if average_delay_sec <= 35.0:
         return "C"
-    elif average_delay_sec <= 55.0 and v_c_ratio <= 0.90:
+    if average_delay_sec <= 55.0:
         return "D"
-    elif average_delay_sec <= 80.0 and v_c_ratio <= 1.00:
+    if average_delay_sec <= 80.0:
         return "E"
-    else:
-        return "F"
+    return "F"
 
 
 def compute_heavy_vehicle_factor(heavy_vehicle_proportion: float) -> float:

@@ -82,6 +82,27 @@ def test_workzone_optimize_endpoint(client):
     assert data["n_closed"] == 1
     assert len(data["optimal_windows"]) == 3
     assert data["sop"]["taper_length_m"] > 0
+    assert len(data["weekly_optimal_windows"]) == 3
+    assert data["weekly_worst_window"]["rank"] == 168
+    assert data["weekly_optimal_windows"][0]["day_of_week"] is not None
+    assert "day_of_week" in data["weekly_worst_window"]
+    assert data["requested_window"] is None
+
+
+def test_workzone_requested_window_endpoint(client):
+    payload = {
+        "corridor_id": "corridor_26july",
+        "closed_lanes": [1, 2],
+        "duration_hours": 6,
+        "day_of_week": 3,
+        "target_start_hour": 9,
+    }
+    response = client.post("/api/dss/workzone-optimize", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["requested_window"]["start_hour"] == 9
+    assert data["requested_window"]["day_of_week"] == 3
+    assert data["requested_window"]["rank"] == 0
 
 
 def test_intersection_simulate_endpoint(client):
@@ -103,6 +124,7 @@ def test_shockwave_predict_endpoint(client):
     payload = {
         "corridor_id": "corridor_26july",
         "hour": 8,
+        "day_of_week": 0,
         "blocked_lanes": 2,
         "incident_type": "COLLISION",
         "weaving_index": 0.5,
@@ -112,6 +134,11 @@ def test_shockwave_predict_endpoint(client):
     data = response.json()
     assert data["backward_shockwave_speed_kmh"] >= 0
     assert len(data["queue_progression"]) > 0
+    # A single day's four lanes must be aggregated, not all seven days.
+    assert data["arrival_flow_pce"] < 20000.0
+    assert data["arrival_speed_kmh"] < 120.0
+    assert data["upstream_exit_distance_m"] == 600.0
+    assert data["queue_progression"][-1]["queue_length_m"] < 100000.0
 
 
 def test_reversible_evaluate_endpoint(client):
@@ -121,12 +148,14 @@ def test_reversible_evaluate_endpoint(client):
         "outbound_flow": 2100.0,
         "corridor_length_km": 8.5,
         "emergency_mode": False,
+        "intersections_count": 4,
     }
     response = client.post("/api/dss/reversible-evaluate", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["recommended_mode"] == "REVERSIBLE_5_3"
-    assert len(data["green_wave_schedule"]) == 5
+    assert len(data["green_wave_schedule"]) == 4
+    assert data["green_wave_schedule"][1]["distance_from_start_m"] == 450.0
 
 
 def test_cv_ingest_endpoint(client):
@@ -161,3 +190,26 @@ def test_cv_ingest_endpoint(client):
     data = response.json()
     assert data["status"] == "SUCCESS"
     assert data["processed_lanes"] == 2
+    assert data["state_updated"] is True
+    assert data["telemetry_day_of_week"] is not None
+    assert data["telemetry_hour"] is not None
+
+    # The live camera frame must be persisted into the current-hour telemetry.
+    telemetry = client.get(
+        f"/api/corridors/corridor_26july/telemetry?day_of_week={data['telemetry_day_of_week']}"
+    )
+    assert telemetry.status_code == 200
+    hour_record = next(
+        h for h in telemetry.json()["hourly_data"] if h["hour"] == data["telemetry_hour"]
+    )
+    lane1 = next(l for l in hour_record["lanes"] if l["lane_number"] == 1)
+    lane2 = next(l for l in hour_record["lanes"] if l["lane_number"] == 2)
+    assert lane1["count_cars"] == 25
+    assert lane1["count_microbus"] == 15
+    assert lane1["avg_speed_kmh"] == 52.0
+    assert lane2["count_cars"] == 45
+    assert lane2["avg_speed_kmh"] == 68.0
+    # PCE uses the platform-wide weighting (cars 1.0, microbus 1.5, bus 2.0,
+    # truck 2.5, motorcycle 0.4).
+    assert lane1["pce_flow"] == pytest.approx(77.5)
+    assert lane2["pce_flow"] == pytest.approx(70.2)

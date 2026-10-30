@@ -9,11 +9,12 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { Zap, AlertOctagon, Timer, ShieldAlert, Sparkles, Sliders } from 'lucide-react';
+import { Zap, AlertOctagon, Timer, ShieldAlert, Sparkles, Sliders, Cpu, Activity, Flame, Gauge, Loader2, Play } from 'lucide-react';
 import { KpiCard } from '../common/KpiCard';
 import {
   ShockwaveResponse,
   predictShockwaveAPI,
+  launchSumoGuiAPI,
 } from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
 
@@ -29,43 +30,101 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
   const t = translations[language];
   const isAr = language === 'ar';
 
+  const [engineMode, setEngineMode] = useState<'analytical' | 'sumo'>('sumo');
   const [incidentType, setIncidentType] = useState<string>('COLLISION');
   const [blockedLanes, setBlockedLanes] = useState<number>(2);
   const [weavingIndex, setWeavingIndex] = useState<number>(0.45);
+  const [incidentHour, setIncidentHour] = useState<number>(8);
+  const [incidentDay, setIncidentDay] = useState<number>(0);
   const [data, setData] = useState<ShockwaveResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const runPrediction = async () => {
+    setLoading(true);
     try {
       const res = await predictShockwaveAPI({
         corridor_id: corridorId,
-        hour: 8,
+        hour: incidentHour,
+        day_of_week: incidentDay,
         blocked_lanes: blockedLanes,
         incident_type: incidentType,
         weaving_index: weavingIndex,
+        engine_mode: engineMode,
+        simulation_duration_sec: 60,
       });
       setData(res);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     runPrediction();
-  }, [corridorId, incidentType, blockedLanes, weavingIndex]);
+  }, [corridorId, incidentHour, incidentDay, incidentType, blockedLanes, weavingIndex, engineMode]);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
-          <Zap className="w-6 h-6 text-rose-500" />
-          {t.sw_title}
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">{t.sw_subtitle}</p>
+      {/* Header with Engine Switcher */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
+            <Zap className="w-6 h-6 text-rose-500" />
+            {t.sw_title}
+            {loading && <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />}
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">{t.sw_subtitle}</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {engineMode === 'sumo' && (
+            <button
+              onClick={async () => {
+                try {
+                  await launchSumoGuiAPI('workzone');
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition shadow-md shadow-emerald-500/20"
+              title={isAr ? 'تشغيل واجهة SUMO المرئية على سطح المكتب' : 'Launch native desktop SUMO-GUI window'}
+            >
+              <Play className="w-3.5 h-3.5 fill-slate-950" />
+              <span>{isAr ? 'تشغيل SUMO-GUI ↗' : 'Launch SUMO-GUI ↗'}</span>
+            </button>
+          )}
+
+          {/* Engine Switcher */}
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-lg">
+            <button
+              onClick={() => setEngineMode('analytical')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                engineMode === 'analytical'
+                  ? 'bg-rose-500 text-slate-950 font-bold shadow-md shadow-rose-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              {t.int_engine_analytical || (isAr ? 'التحليل الهيدروديناميكي (LWR)' : 'LWR Hydrodynamic')}
+            </button>
+            <button
+              onClick={() => setEngineMode('sumo')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                engineMode === 'sumo'
+                  ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              {t.int_engine_sumo || (isAr ? 'محاكاة SUMO TraCI المجهرية' : 'SUMO TraCI Digital Twin')}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Incident Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
         {/* Incident Type */}
         <div>
           <label className="text-xs font-semibold text-slate-300 mb-2 block">
@@ -143,7 +202,157 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
             <span>1.0 (Chaotic Weaving)</span>
           </div>
         </div>
+
+        {/* Incident Time-of-Day */}
+        <div>
+          <div className="flex justify-between text-xs mb-1.5 font-medium">
+            <span className="text-slate-300 flex items-center gap-1">
+              <Timer className="w-3.5 h-3.5 text-amber-400" />
+              {isAr ? 'توقيت وقوع الحادث' : 'Incident Hour of Day'}
+            </span>
+            <span className="font-mono font-bold text-amber-400">
+              {incidentHour.toString().padStart(2, '0')}:00
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={23}
+            step={1}
+            value={incidentHour}
+            onChange={(e) => setIncidentHour(parseInt(e.target.value))}
+            className="w-full accent-amber-400 cursor-pointer h-2 bg-slate-950 rounded-lg appearance-none mt-2"
+          />
+          <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+            <span>00:00</span>
+            <span>08:00</span>
+            <span>16:00</span>
+            <span>23:00</span>
+          </div>
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {isAr
+              ? 'يُحسب الطلب وسرعة الوصول من بيانات الساعة المحددة'
+              : 'Arrival flow and speed are drawn from the selected hour'}
+          </span>
+        </div>
+
+        {/* Incident Day of Week */}
+        <div>
+          <label className="text-xs font-semibold text-slate-300 mb-2 block">
+            {isAr ? 'يوم وقوع الحادث' : 'Incident Day of Week'}
+          </label>
+          <select
+            value={incidentDay}
+            onChange={(e) => setIncidentDay(parseInt(e.target.value))}
+            className="w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+          >
+            {(isAr
+              ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
+              : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+            ).map((dayName, idx) => (
+              <option key={idx} value={idx}>
+                {dayName}
+              </option>
+            ))}
+          </select>
+          <span className="text-[10px] text-slate-500 block mt-2">
+            {isAr
+              ? 'يُستخدم ملف المرور الأسبوعي للتحقق من الذروة'
+              : 'Uses the 7-day telemetry profile for peak validation'}
+          </span>
+        </div>
       </div>
+
+      {/* SUMO TraCI Microscopic Shockwave Telemetry Card */}
+      {data?.sumo_metrics && engineMode === 'sumo' && (
+        <div className="bg-gradient-to-r from-slate-900 via-rose-950/20 to-slate-900 border border-rose-500/30 rounded-xl p-4 shadow-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-rose-400" />
+                {isAr ? 'محاكاة SUMO TraCI المجهرية لموجات الصدمة والاحتكاك المروري' : 'SUMO TraCI Microscopic Incident Shockwave Simulation'}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
+                {data.sumo_metrics.engine}
+              </span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                {isAr ? `${data.sumo_metrics.simulated_vehicles_count} مركبة بمحاكاة TraCI` : `${data.sumo_metrics.simulated_vehicles_count} TraCI Vehs`}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Gauge className="w-3.5 h-3.5 text-rose-400" />
+                {isAr ? 'تصريف عنق الزجاجة' : 'Bottleneck Rate'}
+              </div>
+              <div className="text-base font-mono font-bold text-rose-400 mt-1">
+                {data.sumo_metrics.bottleneck_throughput_pce}
+                <span className="text-[10px] text-slate-500 ml-1">PCE/h</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Activity className="w-3.5 h-3.5 text-amber-400" />
+                {isAr ? 'أقصى طابور مجهري (Q95)' : 'TraCI Q95 Queue'}
+              </div>
+              <div className="text-base font-mono font-bold text-amber-400 mt-1">
+                {data.sumo_metrics.max_queue_m}
+                <span className="text-[10px] text-slate-500 ml-1">m</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Timer className="w-3.5 h-3.5 text-rose-300" />
+                {isAr ? 'متوسط التأخير الفعلي' : 'Avg Time Loss'}
+              </div>
+              <div className="text-base font-mono font-bold text-rose-300 mt-1">
+                {data.sumo_metrics.average_delay_sec}
+                <span className="text-[10px] text-slate-500 ml-1">s/veh</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                {isAr ? 'متوسط سرعة المرور' : 'Mean Speed'}
+              </div>
+              <div className="text-base font-mono font-bold text-emerald-400 mt-1">
+                {data.sumo_metrics.average_speed_kmh}
+                <span className="text-[10px] text-slate-500 ml-1">km/h</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <AlertOctagon className="w-3.5 h-3.5 text-amber-300" />
+                {isAr ? 'مؤشر اضطراب الحارات' : 'Weaving Friction'}
+              </div>
+              <div className="text-base font-mono font-bold text-amber-300 mt-1">
+                {data.sumo_metrics.weaving_turbulence_index}
+                <span className="text-[10px] text-slate-500 ml-1">LC2013</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
+              <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Flame className="w-3.5 h-3.5 text-rose-400" />
+                {isAr ? 'انبعاثات CO2 المحاكاة' : 'CO2 Emissions'}
+              </div>
+              <div className="text-base font-mono font-bold text-slate-200 mt-1">
+                {data.sumo_metrics.co2_emissions_kg_h}
+                <span className="text-[10px] text-slate-500 ml-1">kg/h</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Critical Tactical Gauge Cards */}
       {data && (
@@ -209,7 +418,9 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
             <h3 className="text-sm font-bold text-slate-100">{t.sw_queue_growth}</h3>
             <span className="text-xs text-rose-400 font-mono flex items-center gap-1.5">
               <AlertOctagon className="w-3.5 h-3.5" />
-              {isAr ? 'حد الامتداد الحرج (المخرج السابق): 600 متر' : 'Critical Spillback Threshold: 600m'}
+              {isAr
+                ? `حد الامتداد الحرج (المخرج السابق): ${data.upstream_exit_distance_m} متر`
+                : `Critical Spillback Threshold: ${data.upstream_exit_distance_m}m`}
             </span>
           </div>
 

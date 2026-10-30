@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<net version="1.16" junctionCornerDetail="5" limitTurnSpeed="8.00" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="500.00,500.00" convBoundary="0.00,0.00,1000.00,1000.00" origBoundary="-500.00,-500.00,500.00,500.00" projParameter="!"/>
+
+    <!-- Roundabout Central Island at (500, 500), radius ~45m -->
+    <!-- Approaches -->
+    <edge id="E_WEST_IN" from="J_WEST" to="J_ROT_W" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_IN_0" index="0" speed="22.22" length="450.00" shape="0.00,490.40 450.00,490.40"/>
+        <lane id="E_WEST_IN_1" index="1" speed="22.22" length="450.00" shape="0.00,493.60 450.00,493.60"/>
+        <lane id="E_WEST_IN_2" index="2" speed="22.22" length="450.00" shape="0.00,496.80 450.00,496.80"/>
+    </edge>
+    <edge id="E_WEST_OUT" from="J_ROT_W" to="J_WEST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_WEST_OUT_0" index="0" speed="22.22" length="450.00" shape="450.00,509.60 0.00,509.60"/>
+        <lane id="E_WEST_OUT_1" index="1" speed="22.22" length="450.00" shape="450.00,506.40 0.00,506.40"/>
+        <lane id="E_WEST_OUT_2" index="2" speed="22.22" length="450.00" shape="450.00,503.20 0.00,503.20"/>
+    </edge>
+
+    <edge id="E_EAST_IN" from="J_EAST" to="J_ROT_E" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_IN_0" index="0" speed="22.22" length="450.00" shape="1000.00,509.60 550.00,509.60"/>
+        <lane id="E_EAST_IN_1" index="1" speed="22.22" length="450.00" shape="1000.00,506.40 550.00,506.40"/>
+        <lane id="E_EAST_IN_2" index="2" speed="22.22" length="450.00" shape="1000.00,503.20 550.00,503.20"/>
+    </edge>
+    <edge id="E_EAST_OUT" from="J_ROT_E" to="J_EAST" priority="10" numLanes="3" speed="22.22">
+        <lane id="E_EAST_OUT_0" index="0" speed="22.22" length="450.00" shape="550.00,490.40 1000.00,490.40"/>
+        <lane id="E_EAST_OUT_1" index="1" speed="22.22" length="450.00" shape="550.00,493.60 1000.00,493.60"/>
+        <lane id="E_EAST_OUT_2" index="2" speed="22.22" length="450.00" shape="550.00,496.80 1000.00,496.80"/>
+    </edge>
+
+    <edge id="E_SOUTH_IN" from="J_SOUTH" to="J_ROT_S" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_IN_0" index="0" speed="13.89" length="450.00" shape="504.80,0.00 504.80,450.00"/>
+        <lane id="E_SOUTH_IN_1" index="1" speed="13.89" length="450.00" shape="501.60,0.00 501.60,450.00"/>
+    </edge>
+    <edge id="E_SOUTH_OUT" from="J_ROT_S" to="J_SOUTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_SOUTH_OUT_0" index="0" speed="13.89" length="450.00" shape="495.20,450.00 495.20,0.00"/>
+        <lane id="E_SOUTH_OUT_1" index="1" speed="13.89" length="450.00" shape="498.40,450.00 498.40,0.00"/>
+    </edge>
+
+    <edge id="E_NORTH_IN" from="J_NORTH" to="J_ROT_N" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_IN_0" index="0" speed="13.89" length="450.00" shape="495.20,1000.00 495.20,550.00"/>
+        <lane id="E_NORTH_IN_1" index="1" speed="13.89" length="450.00" shape="498.40,1000.00 498.40,550.00"/>
+    </edge>
+    <edge id="E_NORTH_OUT" from="J_ROT_N" to="J_NORTH" priority="5" numLanes="2" speed="13.89">
+        <lane id="E_NORTH_OUT_0" index="0" speed="13.89" length="450.00" shape="504.80,550.00 504.80,1000.00"/>
+        <lane id="E_NORTH_OUT_1" index="1" speed="13.89" length="450.00" shape="501.60,550.00 501.60,1000.00"/>
+    </edge>
+
+    <!-- Circulating Edges of the 3-Lane Roundabout (Counter-Clockwise: South -> East -> North -> West -> South) -->
+    <edge id="E_ROT_S_E" from="J_ROT_S" to="J_ROT_E" priority="12" numLanes="3" speed="11.11">
+        <lane id="E_ROT_S_E_0" index="0" speed="11.11" length="75.00" shape="510.00,455.00 545.00,490.00"/>
+        <lane id="E_ROT_S_E_1" index="1" speed="11.11" length="75.00" shape="507.00,458.00 542.00,493.00"/>
+        <lane id="E_ROT_S_E_2" index="2" speed="11.11" length="75.00" shape="504.00,461.00 539.00,496.00"/>
+    </edge>
+    <edge id="E_ROT_E_N" from="J_ROT_E" to="J_ROT_N" priority="12" numLanes="3" speed="11.11">
+        <lane id="E_ROT_E_N_0" index="0" speed="11.11" length="75.00" shape="545.00,510.00 510.00,545.00"/>
+        <lane id="E_ROT_E_N_1" index="1" speed="11.11" length="75.00" shape="542.00,507.00 507.00,542.00"/>
+        <lane id="E_ROT_E_N_2" index="2" speed="11.11" length="75.00" shape="539.00,504.00 504.00,539.00"/>
+    </edge>
+    <edge id="E_ROT_N_W" from="J_ROT_N" to="J_ROT_W" priority="12" numLanes="3" speed="11.11">
+        <lane id="E_ROT_N_W_0" index="0" speed="11.11" length="75.00" shape="490.00,545.00 455.00,510.00"/>
+        <lane id="E_ROT_N_W_1" index="1" speed="11.11" length="75.00" shape="493.00,542.00 458.00,507.00"/>
+        <lane id="E_ROT_N_W_2" index="2" speed="11.11" length="75.00" shape="496.00,539.00 461.00,504.00"/>
+    </edge>
+    <edge id="E_ROT_W_S" from="J_ROT_W" to="J_ROT_S" priority="12" numLanes="3" speed="11.11">
+        <lane id="E_ROT_W_S_0" index="0" speed="11.11" length="75.00" shape="455.00,490.00 490.00,455.00"/>
+        <lane id="E_ROT_W_S_1" index="1" speed="11.11" length="75.00" shape="458.00,493.00 493.00,458.00"/>
+        <lane id="E_ROT_W_S_2" index="2" speed="11.11" length="75.00" shape="461.00,496.00 496.00,461.00"/>
+    </edge>
+
+    <!-- Junction Nodes -->
+    <junction id="J_WEST" type="dead_end" x="0.00" y="500.00" incLanes="E_WEST_OUT_0 E_WEST_OUT_1 E_WEST_OUT_2" intLanes="" shape="0.00,500.00 0.00,488.80 0.00,511.20"/>
+    <junction id="J_EAST" type="dead_end" x="1000.00" y="500.00" incLanes="E_EAST_OUT_0 E_EAST_OUT_1 E_EAST_OUT_2" intLanes="" shape="1000.00,500.00 1000.00,511.20 1000.00,488.80"/>
+    <junction id="J_NORTH" type="dead_end" x="500.00" y="1000.00" incLanes="E_NORTH_OUT_0 E_NORTH_OUT_1" intLanes="" shape="500.00,1000.00 493.60,1000.00 506.40,1000.00"/>
+    <junction id="J_SOUTH" type="dead_end" x="500.00" y="0.00" incLanes="E_SOUTH_OUT_0 E_SOUTH_OUT_1" intLanes="" shape="500.00,0.00 506.40,0.00 493.60,0.00"/>
+
+    <!-- Roundabout Entry/Exit Nodes -->
+    <junction id="J_ROT_W" type="unregulated" x="450.00" y="500.00" incLanes="E_ROT_N_W_0 E_ROT_N_W_1 E_ROT_N_W_2 E_WEST_IN_0 E_WEST_IN_1 E_WEST_IN_2" intLanes="" shape="445.00,515.00 455.00,515.00 455.00,485.00 445.00,485.00"/>
+    <junction id="J_ROT_E" type="unregulated" x="550.00" y="500.00" incLanes="E_ROT_S_E_0 E_ROT_S_E_1 E_ROT_S_E_2 E_EAST_IN_0 E_EAST_IN_1 E_EAST_IN_2" intLanes="" shape="545.00,485.00 555.00,485.00 555.00,515.00 545.00,515.00"/>
+    <junction id="J_ROT_S" type="unregulated" x="500.00" y="450.00" incLanes="E_ROT_W_S_0 E_ROT_W_S_1 E_ROT_W_S_2 E_SOUTH_IN_0 E_SOUTH_IN_1" intLanes="" shape="485.00,445.00 485.00,455.00 515.00,455.00 515.00,445.00"/>
+    <junction id="J_ROT_N" type="unregulated" x="500.00" y="550.00" incLanes="E_ROT_E_N_0 E_ROT_E_N_1 E_ROT_E_N_2 E_NORTH_IN_0 E_NORTH_IN_1" intLanes="" shape="515.00,555.00 515.00,545.00 485.00,545.00 485.00,555.00"/>
+
+    <!-- Connections: Circulating has Priority (state="M") -->
+    <!-- West Inbound Entry -->
+    <connection from="E_ROT_N_W" to="E_WEST_OUT" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_ROT_N_W" to="E_ROT_W_S" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_ROT_N_W" to="E_ROT_W_S" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_WEST_IN" to="E_ROT_W_S" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_WEST_IN" to="E_ROT_W_S" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_WEST_IN" to="E_ROT_W_S" fromLane="2" toLane="2" dir="l" state="M"/>
+
+    <!-- South Inbound Entry -->
+    <connection from="E_ROT_W_S" to="E_SOUTH_OUT" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_ROT_W_S" to="E_ROT_S_E" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_ROT_W_S" to="E_ROT_S_E" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_SOUTH_IN" to="E_ROT_S_E" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_SOUTH_IN" to="E_ROT_S_E" fromLane="1" toLane="1" dir="s" state="M"/>
+
+    <!-- East Inbound Entry -->
+    <connection from="E_ROT_S_E" to="E_EAST_OUT" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_ROT_S_E" to="E_ROT_E_N" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_ROT_S_E" to="E_ROT_E_N" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_EAST_IN" to="E_ROT_E_N" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_EAST_IN" to="E_ROT_E_N" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_EAST_IN" to="E_ROT_E_N" fromLane="2" toLane="2" dir="l" state="M"/>
+
+    <!-- North Inbound Entry -->
+    <connection from="E_ROT_E_N" to="E_NORTH_OUT" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_ROT_E_N" to="E_ROT_N_W" fromLane="1" toLane="1" dir="s" state="M"/>
+    <connection from="E_ROT_E_N" to="E_ROT_N_W" fromLane="2" toLane="2" dir="s" state="M"/>
+    <connection from="E_NORTH_IN" to="E_ROT_N_W" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="E_NORTH_IN" to="E_ROT_N_W" fromLane="1" toLane="1" dir="s" state="M"/>
+</net>

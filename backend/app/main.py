@@ -7,36 +7,26 @@ and full CORS configuration for the React frontend command center.
 import sys
 from pathlib import Path
 
-# Ensure project root is always in Python path regardless of execution directory
+# Ensure project root and backend dir are in Python path regardless of execution directory
 _ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(_ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(_ROOT_DIR))
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+for _p in (str(_ROOT_DIR), str(_BACKEND_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import SQLModel, create_engine, Session
 
 from backend.app.api.routes import router as api_router
+from backend.app.database import create_db_and_tables, engine, get_session
 from backend.app.services.synthetic_seeder import seed_corridors_and_telemetry
-
-
-DATABASE_URL = "sqlite:///traffic_dss.db"
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    echo=False,
-)
-
-
-def get_session():
-    return Session(engine)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create tables and seed synthetic Egyptian corridor data
-    SQLModel.metadata.create_all(engine)
+    create_db_and_tables()
     with get_session() as session:
         seed_corridors_and_telemetry(session)
     yield
@@ -63,7 +53,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://localhost:8080",
-        "*",
+        "http://localhost:8765",
+        "http://127.0.0.1:8765",
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -14,6 +14,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
+from backend.app.database import get_session
 from backend.app.models.domain import Corridor, HourlyTelemetry
 from backend.app.models.schemas import (
     CorridorSummary,
@@ -36,14 +37,10 @@ from backend.app.core.intersection_engine import simulate_intersections
 from backend.app.core.shockwave_engine import predict_incident_shockwave
 from backend.app.core.reversible_engine import evaluate_reversible_corridor
 from backend.app.services.cv_ingestion import process_cv_feed
+from backend.app.sumo.service import run_sumo_simulation, get_sumo_system_status
+from backend.app.sumo.runner import execute_traci_workzone_sim, launch_sumo_gui
 
 router = APIRouter(prefix="/api", tags=["IT-DSS Core"])
-
-
-def get_db():
-    from backend.app.main import get_session
-    with get_session() as session:
-        yield session
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +60,7 @@ def health_check():
 # Corridors & Telemetry
 # ---------------------------------------------------------------------------
 @router.get("/corridors", response_model=List[CorridorSummary])
-def list_corridors(session: Session = Depends(get_db)):
+def list_corridors(session: Session = Depends(get_session)):
     corridors = session.exec(select(Corridor)).all()
     return [
         CorridorSummary(
@@ -85,7 +82,7 @@ def list_corridors(session: Session = Depends(get_db)):
 def get_corridor_telemetry(
     corridor_id: str,
     day_of_week: int = Query(default=0, ge=0, le=6),
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_session),
 ):
     corridor = session.get(Corridor, corridor_id)
     if not corridor:
@@ -161,7 +158,154 @@ def get_corridor_telemetry(
 @router.post("/dss/workzone-optimize", response_model=WorkZoneResponse)
 def optimize_workzone(
     payload: WorkZoneRequest,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_session),
+):
+    corridor = session.get(Corridor, payload.corridor_id)
+    if not corridor:
+        raise HTTPException(status_code=404, detail=f"Corridor '{payload.corridor_id}' not found.")
+
+    # Load the full 7-day profile once so the optimizer can rank all 168 hourly
+    # start positions, not just the selected analysis day.
+    statement = (
+        select(HourlyTelemetry)
+        .where(HourlyTelemetry.corridor_id == payload.corridor_id)
+        .order_by(HourlyTelemetry.day_of_week, HourlyTelemetry.hour, HourlyTelemetry.lane_number)
+    )
+    records = session.exec(statement).all()
+
+    aggregates = {
+        (day, hour): {"pce": 0.0, "pax": 0.0, "vehicles": 0.0, "heavy": 0.0}
+        for day in range(7)
+        for hour in range(24)
+    }
+    for record in records:
+        bucket = aggregates[(record.day_of_week, record.hour)]
+        bucket["pce"] += record.pce_flow
+        bucket["pax"] += record.passenger_flow
+        bucket["vehicles"] += (
+            record.count_cars
+            + record.count_microbus
+            + record.count_buses
+            + record.count_trucks
+            + record.count_motorcycles
+        )
+        bucket["heavy"] += record.count_buses + record.count_trucks
+
+    weekly_demands: List[List[float]] = []
+    weekly_passengers: List[List[float]] = []
+    weekly_heavy_ratios: List[List[float]] = []
+
+    for day in range(7):
+        day_pce: List[float] = []
+        day_pax: List[float] = []
+        day_hv: List[float] = []
+        for hour in range(24):
+            bucket = aggregates[(day, hour)]
+            if bucket["vehicles"] > 0:
+                day_pce.append(bucket["pce"])
+                day_pax.append(bucket["pax"])
+                day_hv.append(bucket["heavy"] / max(1.0, bucket["vehicles"]))
+            else:
+                # Defensive fallback if a telemetry slice is missing.
+                day_pce.append(4500.0)
+                day_pax.append(12000.0)
+                day_hv.append(0.12)
+        weekly_demands.append(day_pce)
+        weekly_passengers.append(day_pax)
+        weekly_heavy_ratios.append(day_hv)
+
+    selected_day = payload.day_of_week
+    response = optimize_workzone_schedule(
+        request=payload,
+        hourly_demands=weekly_demands[selected_day],
+        hourly_passengers=weekly_passengers[selected_day],
+        hourly_heavy_ratios=weekly_heavy_ratios[selected_day],
+        corridor_speed_limit=corridor.speed_limit_kmh,
+        upstream_exit_distance_m=corridor.upstream_exit_distance_m,
+        base_capacity_per_lane=corridor.base_capacity_per_lane,
+        weekly_demands=weekly_demands,
+        weekly_passengers=weekly_passengers,
+        weekly_heavy_ratios=weekly_heavy_ratios,
+    )
+
+    if payload.engine_mode == "sumo":
+        target_hr = payload.target_start_hour if payload.target_start_hour is not None else (
+            response.optimal_windows[0].start_hour if response.optimal_windows else 2
+        )
+        sim_demand = weekly_demands[selected_day][target_hr] if 0 <= target_hr < 24 else 2500.0
+        duration = getattr(payload, "simulation_duration_sec", 60)
+        try:
+            wz_metrics = execute_traci_workzone_sim(
+                closed_lanes=payload.closed_lanes,
+                demand_pce=sim_demand,
+                speed_limit_kmh=corridor.speed_limit_kmh,
+                duration_sec=duration,
+            )
+            response.sumo_metrics = wz_metrics
+        except Exception as err:
+            logger.warning(f"SUMO workzone simulation error: {err}")
+
+    return response
+
+
+@router.post("/dss/sumo/workzone-simulate")
+def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(get_session)):
+    corridor = session.get(Corridor, payload.corridor_id)
+    speed_limit = corridor.speed_limit_kmh if corridor else 80.0
+    return execute_traci_workzone_sim(
+        closed_lanes=payload.closed_lanes,
+        demand_pce=4800.0,
+        speed_limit_kmh=speed_limit,
+        duration_sec=getattr(payload, "simulation_duration_sec", 60),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Module 2: Intersection Signal Warrant & What-If
+# ---------------------------------------------------------------------------
+@router.post("/dss/intersection-simulate", response_model=IntersectionResponse)
+def simulate_intersection_alternatives(payload: IntersectionRequest):
+    if payload.engine_mode == "sumo":
+        try:
+            return run_sumo_simulation(payload)
+        except Exception as e:
+            import traceback
+            err_msg = traceback.format_exc()
+            with open("sumo_error.log", "w", encoding="utf-8") as f:
+                f.write(err_msg)
+            raise HTTPException(status_code=500, detail=str(e))
+    return simulate_intersections(payload)
+
+
+@router.get("/dss/sumo/status")
+def get_sumo_status():
+    return get_sumo_system_status()
+
+
+@router.post("/dss/sumo/launch-gui")
+def trigger_sumo_gui(
+    scenario: str = Query("intersection", description="'intersection' | 'workzone'"),
+    alt_id: str = Query("SIGNAL", description="'OPEN' | 'SIGNAL' | 'UTURN' | 'ROUNDABOUT'"),
+):
+    try:
+        return launch_sumo_gui(scenario_type=scenario, alt_id=alt_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/dss/sumo/intersection-simulate", response_model=IntersectionResponse)
+def simulate_with_sumo_endpoint(payload: IntersectionRequest):
+    payload.engine_mode = "sumo"
+    return run_sumo_simulation(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 3: Incident Shockwave & Micro-Friction Predictor
+# ---------------------------------------------------------------------------
+@router.post("/dss/shockwave-predict", response_model=ShockwaveResponse)
+def predict_shockwave(
+    payload: ShockwaveRequest,
+    session: Session = Depends(get_session),
 ):
     corridor = session.get(Corridor, payload.corridor_id)
     if not corridor:
@@ -171,70 +315,6 @@ def optimize_workzone(
         select(HourlyTelemetry)
         .where(HourlyTelemetry.corridor_id == payload.corridor_id)
         .where(HourlyTelemetry.day_of_week == payload.day_of_week)
-        .order_by(HourlyTelemetry.hour, HourlyTelemetry.lane_number)
-    )
-    records = session.exec(statement).all()
-
-    hourly_demands: List[float] = []
-    hourly_passengers: List[float] = []
-    hourly_heavy_ratios: List[float] = []
-
-    for h in range(24):
-        hour_lanes = [r for r in records if r.hour == h]
-        if hour_lanes:
-            h_pce = sum(r.pce_flow for r in hour_lanes)
-            h_pax = sum(r.passenger_flow for r in hour_lanes)
-            tot_v = sum(
-                r.count_cars + r.count_microbus + r.count_buses + r.count_trucks + r.count_motorcycles
-                for r in hour_lanes
-            )
-            tot_hv = sum(r.count_buses + r.count_trucks for r in hour_lanes)
-            hv_ratio = tot_hv / max(1, tot_v)
-        else:
-            # Fallback default values
-            h_pce = 4500.0
-            h_pax = 12000.0
-            hv_ratio = 0.12
-
-        hourly_demands.append(h_pce)
-        hourly_passengers.append(h_pax)
-        hourly_heavy_ratios.append(hv_ratio)
-
-    response = optimize_workzone_schedule(
-        request=payload,
-        hourly_demands=hourly_demands,
-        hourly_passengers=hourly_passengers,
-        hourly_heavy_ratios=hourly_heavy_ratios,
-        corridor_speed_limit=corridor.speed_limit_kmh,
-        upstream_exit_distance_m=corridor.upstream_exit_distance_m,
-        base_capacity_per_lane=corridor.base_capacity_per_lane,
-    )
-    return response
-
-
-# ---------------------------------------------------------------------------
-# Module 2: Intersection Signal Warrant & What-If
-# ---------------------------------------------------------------------------
-@router.post("/dss/intersection-simulate", response_model=IntersectionResponse)
-def simulate_intersection_alternatives(payload: IntersectionRequest):
-    return simulate_intersections(payload)
-
-
-# ---------------------------------------------------------------------------
-# Module 3: Incident Shockwave & Micro-Friction Predictor
-# ---------------------------------------------------------------------------
-@router.post("/dss/shockwave-predict", response_model=ShockwaveResponse)
-def predict_shockwave(
-    payload: ShockwaveRequest,
-    session: Session = Depends(get_db),
-):
-    corridor = session.get(Corridor, payload.corridor_id)
-    if not corridor:
-        raise HTTPException(status_code=404, detail=f"Corridor '{payload.corridor_id}' not found.")
-
-    statement = (
-        select(HourlyTelemetry)
-        .where(HourlyTelemetry.corridor_id == payload.corridor_id)
         .where(HourlyTelemetry.hour == payload.hour)
     )
     records = session.exec(statement).all()
@@ -246,13 +326,30 @@ def predict_shockwave(
         arrival_flow = 5800.0
         arrival_speed = corridor.speed_limit_kmh * 0.75
 
-    return predict_incident_shockwave(
+    response = predict_incident_shockwave(
         request=payload,
         arrival_flow_pce=arrival_flow,
         arrival_speed_kmh=arrival_speed,
         upstream_exit_distance_m=corridor.upstream_exit_distance_m,
         base_capacity_per_lane=corridor.base_capacity_per_lane,
     )
+
+    if payload.engine_mode == "sumo":
+        closed_indices = list(range(1, payload.blocked_lanes + 1))
+        duration = getattr(payload, "simulation_duration_sec", 60)
+        try:
+            sumo_res = execute_traci_workzone_sim(
+                closed_lanes=closed_indices,
+                demand_pce=arrival_flow,
+                speed_limit_kmh=corridor.speed_limit_kmh,
+                duration_sec=duration,
+            )
+            response.sumo_metrics = sumo_res
+            response.engine_used = "SUMO / TraCI (C++ Highway Core)"
+        except Exception as err:
+            logger.warning(f"SUMO incident simulation error: {err}")
+
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +366,9 @@ def evaluate_reversible(payload: ReversibleRequest):
 @router.post("/cv/ingest", response_model=CVIngestResponse)
 def ingest_cv_telemetry(
     payload: CVIngestRequest,
-    session: Session = Depends(get_db),
+    session: Session = Depends(get_session),
 ):
-    return process_cv_feed(payload, session)
+    result = process_cv_feed(payload, session)
+    if result.status == "ERROR":
+        raise HTTPException(status_code=404, detail=result.message)
+    return result

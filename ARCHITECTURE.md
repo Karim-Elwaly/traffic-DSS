@@ -98,11 +98,17 @@ traffic-dss-platform/
 │   │   ├── services/
 │   │   │   ├── synthetic_seeder.py  # 3 Egyptian Corridors x 4 Lanes x 7 Days x 24 Hours
 │   │   │   └── cv_ingestion.py      # Edge YOLOv8/v11 + ByteTrack ingestion pipeline
+│   │   ├── sumo/
+│   │   │   ├── networks/            # 4 Cairo geometric networks XML & base.sumocfg
+│   │   │   ├── generator.py         # Multi-class heterogeneous vehicle & route generator
+│   │   │   ├── runner.py            # TraCI runtime execution & microscopic metric extractor
+│   │   │   └── service.py           # Hybrid Digital Twin orchestrator & fallback
 │   │   └── api/
-│   │       └── routes.py            # 8 REST API endpoints
+│   │       └── routes.py            # 10 REST API endpoints (HCM + SUMO Digital Twin)
 │   └── tests/
 │       ├── test_engines.py          # Unit tests for all 4 mathematical engines
-│       └── test_api.py              # FastAPI TestClient integration test suite
+│       ├── test_api.py              # FastAPI TestClient integration test suite
+│       └── test_sumo.py             # SUMO TraCI & microscopic simulation test suite
 └── frontend/
     ├── package.json                 # React 18, Lucide React, Recharts, Tailwind CSS
     ├── vite.config.ts               # Vite configuration (Port 5199, reverse proxy to :8765)

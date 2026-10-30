@@ -1,17 +1,13 @@
-version: '3.8'
-
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: it_dss_backend
     ports:
       - "8765:8765"
     environment:
       - PYTHONUNBUFFERED=1
-    volumes:
-      - ./backend:/app
     restart: unless-stopped
 
   frontend:
@@ -22,10 +18,7 @@ services:
     ports:
       - "5199:5199"
     environment:
-      - VITE_API_URL=http://localhost:8765
+      - VITE_API_PROXY_TARGET=http://backend:8765
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     restart: unless-stopped

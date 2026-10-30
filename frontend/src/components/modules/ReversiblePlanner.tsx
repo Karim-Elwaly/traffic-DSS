@@ -22,6 +22,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
   const [inboundFlow, setInboundFlow] = useState<number>(6600);
   const [outboundFlow, setOutboundFlow] = useState<number>(2100);
   const [corridorLength, setCorridorLength] = useState<number>(8.5);
+  const [intersectionsCount, setIntersectionsCount] = useState<number>(5);
   const [emergencyMode, setEmergencyMode] = useState<boolean>(false);
   const [data, setData] = useState<ReversibleResponse | null>(null);
 
@@ -33,6 +34,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
         outbound_flow: outboundFlow,
         corridor_length_km: corridorLength,
         emergency_mode: emergencyMode,
+        intersections_count: intersectionsCount,
       });
       setData(res);
     } catch (err) {
@@ -42,7 +44,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
 
   useEffect(() => {
     runEvaluation();
-  }, [corridorId, inboundFlow, outboundFlow, corridorLength, emergencyMode]);
+  }, [corridorId, inboundFlow, outboundFlow, corridorLength, intersectionsCount, emergencyMode]);
 
   return (
     <div className="space-y-6">
@@ -56,7 +58,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
       </div>
 
       {/* Sliders & Emergency Flush Toggle */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
         {/* Inbound Flow */}
         <div>
           <div className="flex justify-between text-xs mb-1.5 font-medium">
@@ -89,6 +91,43 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
             onChange={(e) => setOutboundFlow(parseInt(e.target.value))}
             className="w-full accent-cyan-400 cursor-pointer h-2 bg-slate-950 rounded-lg appearance-none mt-2"
           />
+        </div>
+
+        {/* Corridor Length */}
+        <div>
+          <div className="flex justify-between text-xs mb-1.5 font-medium">
+            <span className="text-slate-300">{isAr ? 'طول المحور' : 'Corridor Length'}</span>
+            <span className="font-mono font-bold text-amber-400">{corridorLength} km</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={25}
+            step={0.5}
+            value={corridorLength}
+            onChange={(e) => setCorridorLength(parseFloat(e.target.value))}
+            className="w-full accent-amber-400 cursor-pointer h-2 bg-slate-950 rounded-lg appearance-none mt-2"
+          />
+        </div>
+
+        {/* Green Wave Node Count */}
+        <div>
+          <div className="flex justify-between text-xs mb-1.5 font-medium">
+            <span className="text-slate-300">{isAr ? 'عدد التقاطعات المزامنة' : 'Signalized Nodes'}</span>
+            <span className="font-mono font-bold text-emerald-400">{intersectionsCount}</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={10}
+            step={1}
+            value={intersectionsCount}
+            onChange={(e) => setIntersectionsCount(parseInt(e.target.value))}
+            className="w-full accent-emerald-400 cursor-pointer h-2 bg-slate-950 rounded-lg appearance-none mt-2"
+          />
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {isAr ? 'تباعد ثابت 450 متر بين الإشارات' : 'Fixed 450m spacing between signals'}
+          </span>
         </div>
 
         {/* Emergency VIP Flush Toggle */}
@@ -142,7 +181,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
           </div>
           <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
             <span>50% Balanced</span>
-            <span className="text-amber-400 font-bold">65% Reversible Threshold</span>
+            <span className="text-amber-400 font-bold">68% Reversible Threshold</span>
             <span>85% Extreme Surge</span>
           </div>
         </div>
@@ -230,8 +269,8 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
               <h3 className="text-sm font-bold text-slate-100">{t.rev_green_wave_title}</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {isAr
-                  ? 'مزامنة 5 تقاطعات متتالية بسرعة تصميمية 60 كم/س'
-                  : '5 Consecutive Intersections synchronized at 60 km/h design progression speed'}
+                  ? `${data.green_wave_schedule.length} تقاطعات متتالية متزامنة بسرعة تصميمية 60 كم/س وتباعد 450 متر`
+                  : `${data.green_wave_schedule.length} consecutive intersections synchronized at 60 km/h design speed with 450m spacing`}
               </p>
             </div>
             <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">

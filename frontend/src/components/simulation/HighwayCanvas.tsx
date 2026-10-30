@@ -8,6 +8,8 @@ interface HighwayCanvasProps {
   capacityPce: number;
   weavingIndex?: number;
   language?: 'en' | 'ar';
+  engineMode?: 'analytical' | 'sumo';
+  isSumoNative?: boolean;
 }
 
 interface Vehicle {
@@ -30,6 +32,8 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   capacityPce,
   weavingIndex = 0.2,
   language = 'en',
+  engineMode = 'analytical',
+  isSumoNative = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -303,13 +307,10 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
 
       // 6. Draw Shockwave Backpressure Queue Indicator
       if (isCongested) {
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
         ctx.font = 'bold 11px Inter, Cairo, sans-serif';
-        ctx.fillText(
-          language === 'ar' ? '⚠️ ارتداد موجة تكدس (LWR Shockwave)' : '⚠️ LWR Incident Shockwave Queue Active',
-          taperStartX - 190,
-          roadTop - 8
-        );
+        const txt = language === 'ar' ? '⚠️ ارتداد موجة تكدس (Shockwave)' : '⚠️ Incident Shockwave Queue Active';
+        ctx.fillText(txt, Math.max(20, taperStartX - 190), roadTop - 8);
       }
 
       animationFrameIdRef.current = requestAnimationFrame(render);
@@ -334,6 +335,12 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
               ? 'المحاكي الميكروسكوبي الحي للطريق السريع (60 إطار/ثانية)'
               : 'Live 60fps Microscopic 4-Lane Highway Simulator'}
           </h4>
+          {engineMode === 'sumo' && (
+            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {isSumoNative ? 'SUMO TraCI Native' : 'SUMO TraCI Twin'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* Vehicle Class Legend */}
