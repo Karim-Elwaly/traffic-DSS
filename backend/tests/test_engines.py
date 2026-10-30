@@ -165,6 +165,23 @@ def test_intersection_engine_heavy_demand_prefers_grade_separated_or_signal():
         assert alt.volume_to_capacity < 100.0
 
 
+def test_uncontrolled_open_junction_cannot_win_at_gridlock():
+    # 10,500 veh/h is well above the 8-lane gap-acceptance capacity. An open
+    # junction must show a large HCM overflow delay and never be recommended.
+    resp = simulate_intersections(
+        IntersectionRequest(
+            main_flow=7000.0,
+            cross_flow=3500.0,
+            turning_pct=18.0,
+            heavy_pct=12.0,
+            uturn_distance_m=450.0,
+        )
+    )
+    open_alt = next(a for a in resp.alternatives if a.id == "OPEN")
+    assert open_alt.average_delay_sec > 150.0
+    assert resp.recommended_option_id != "OPEN"
+
+
 def test_shockwave_engine():
     req = ShockwaveRequest(
         corridor_id="corridor_26july",
@@ -225,6 +242,34 @@ def test_reversible_engine():
     assert resp.travel_time_saved_pct >= 0.0
     assert len(resp.green_wave_schedule) == 5
     assert resp.pre_arrival_flush_time_sec > 18.0
+
+
+def test_reversible_high_inbound_surge_delay_and_travel_time_agree():
+    # 9,000/500: standard 4+4 inbound is at v/c 1.25; 5+3 cuts it to 1.02.
+    # The reallocation must be recommended and its delay saving must be
+    # consistent with the travel-time saving instead of reporting 0 s/100%.
+    resp = evaluate_reversible_corridor(
+        ReversibleRequest(
+            corridor_id="corridor_26july",
+            inbound_flow=9000.0,
+            outbound_flow=500.0,
+            corridor_length_km=8.5,
+            emergency_mode=False,
+        )
+    )
+    assert resp.recommended_mode == "REVERSIBLE_5_3"
+    assert (
+        resp.reversible_5_3.inbound_delay_sec
+        < resp.standard_4_4.inbound_delay_sec
+    )
+    assert resp.delay_reduction_pct > 0.0
+    assert resp.travel_time_saved_pct > 0.0
+    # Both metrics come from the same travel-time difference.
+    expected = (
+        resp.standard_4_4.inbound_delay_sec
+        - resp.reversible_5_3.inbound_delay_sec
+    ) / max(0.1, resp.standard_4_4.inbound_delay_sec) * 100.0
+    assert resp.delay_reduction_pct == pytest.approx(expected, abs=0.2)
 
 
 def test_reversible_activation_requires_strict_68_and_outbound_headroom():

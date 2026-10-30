@@ -13,7 +13,7 @@ import { Construction, AlertTriangle, CheckCircle2, Clock, Calendar, Layers, Loa
 import { HighwayCanvas } from '../simulation/HighwayCanvas';
 import { KpiCard } from '../common/KpiCard';
 import { SopActionCard } from '../common/SopActionCard';
-import { WorkZoneResponse, optimizeWorkZoneAPI } from '../../api/client';
+import { WorkZoneResponse, WindowOption, optimizeWorkZoneAPI } from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
 
 interface WorkZoneAdvisorProps {
@@ -104,17 +104,56 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       : data?.worst_window;
   const recommendedWindow = hasWeekly ? weeklyWindows[0] : data?.optimal_windows[0];
 
-  const canvasWindow =
-    data?.requested_window ?? activeWindows[0] ?? recommendedWindow;
-  const closureDemandPce = canvasWindow
-    ? Math.round(canvasWindow.avg_demand_pce)
-    : 0;
-  const canvasCapacityPce = canvasWindow
-    ? Math.round(canvasWindow.avg_capacity_pce)
-    : 0;
+  const canvasWindow: WindowOption | null | undefined =
+    data?.requested_window ?? data?.worst_window ?? activeWindows[0];
+
+  // The canvas simulates one representative hour, not a fictitious average.
+  // When the requested window exists it follows that demand period; otherwise
+  // it stress-tests the selected day's worst window. Within the window the
+  // canvas uses the highest-demand hour so it never hides the peak.
+  const canvasOnSelectedDay =
+    !canvasWindow ||
+    canvasWindow.day_of_week == null ||
+    canvasWindow.day_of_week === dayOfWeek;
+  const canvasHour = (() => {
+    if (!data || !canvasWindow || !canvasOnSelectedDay) return null;
+    let best: (typeof data.hourly_curves)[number] | null = null;
+    for (let i = 0; i < Math.max(1, data.duration_hours); i += 1) {
+      const hour = (canvasWindow.start_hour + i) % 24;
+      const detail = data.hourly_curves.find((c) => c.hour === hour);
+      if (detail && (!best || detail.demand_pce > best.demand_pce)) {
+        best = detail;
+      }
+    }
+    return best;
+  })();
+
+  const closureDemandPce = Math.round(
+    canvasHour?.demand_pce ?? canvasWindow?.avg_demand_pce ?? 0
+  );
+  const canvasCapacityPce = Math.round(
+    canvasHour?.effective_capacity ??
+      canvasWindow?.avg_capacity_pce ??
+      (data?.workzone_capacity ?? 0)
+  );
   const canvasHeavyPct = canvasWindow
     ? canvasWindow.heavy_vehicle_percentage
     : 0;
+  const canvasHourLabel = canvasHour
+    ? `${padHour(canvasHour.hour)}:00`
+    : null;
+  const canvasWindowLabel = canvasWindow
+    ? formatWindowRange(canvasWindow)
+    : null;
+  const canvasScenarioLabel = canvasWindow
+    ? data?.requested_window
+      ? isAr
+        ? `${canvasHourLabel ?? 'متوسط النافذة'} · الساعة المطلوبة · ${formatWindowDay(canvasWindow)} · ${canvasWindowLabel}`
+        : `${canvasHourLabel ?? 'window average'} · requested window · ${formatWindowDay(canvasWindow)} · ${canvasWindowLabel}`
+      : isAr
+      ? `${canvasHourLabel ?? 'متوسط النافذة'} · ساعة اختبار الضغط · ${formatWindowDay(canvasWindow)} · ${canvasWindowLabel}`
+      : `${canvasHourLabel ?? 'window average'} · stress-test hour · ${formatWindowDay(canvasWindow)} · ${canvasWindowLabel}`
+    : undefined;
 
   return (
     <div className="space-y-6">
@@ -553,6 +592,13 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
           demandPce={closureDemandPce}
           capacityPce={canvasCapacityPce}
           heavyPct={canvasHeavyPct}
+          workzoneSpeedKmh={data?.sop.workzone_speed_limit_kmh}
+          storageM={data?.upstream_exit_distance_m}
+          scenarioLabel={canvasScenarioLabel}
+          planningDelaySec={canvasHour?.delay_sec_per_veh}
+          planningQueueM={
+            canvasHour?.queue_length_m ?? canvasWindow?.max_queue_length_m
+          }
           language={language}
         />
       ) : (

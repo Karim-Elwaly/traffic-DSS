@@ -10,6 +10,7 @@ _ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 if str(_ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(_ROOT_DIR))
 
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
@@ -41,6 +42,8 @@ from backend.app.sumo.service import run_sumo_simulation, get_sumo_system_status
 from backend.app.sumo.runner import execute_traci_workzone_sim, launch_sumo_gui
 
 router = APIRouter(prefix="/api", tags=["IT-DSS Core"])
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

@@ -124,6 +124,7 @@ class WorkZoneResponse(BaseModel):
     workzone_capacity: float
     capacity_drop_pct: float
     heavy_vehicle_percentage: float = 12.0
+    upstream_exit_distance_m: float = 600.0
     hourly_curves: List[HourlyWorkZoneDetail]
     optimal_windows: List[WindowOption]
     worst_window: WindowOption

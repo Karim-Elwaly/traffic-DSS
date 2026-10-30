@@ -19,6 +19,16 @@ interface HighwayCanvasProps {
   weavingIndex?: number;
   language?: 'en' | 'ar';
   heavyPct?: number;
+  /** Posted work-zone speed from the analytical SOP (max(40, limit - 20)). */
+  workzoneSpeedKmh?: number;
+  /** Physical upstream storage between the taper and the previous exit. */
+  storageM?: number;
+  /** Human-readable description of the day/hour being simulated. */
+  scenarioLabel?: string;
+  /** Analytical hourly delay for the same scenario, for comparison. */
+  planningDelaySec?: number;
+  /** Analytical hourly queue for the same scenario, for comparison. */
+  planningQueueM?: number;
 }
 
 interface Vehicle {
@@ -63,8 +73,6 @@ const TAPER_START_M = 130;
 const TAPER_END_M = 165;
 const ENTRY_M = -5;
 const EXIT_M = NETWORK_M + 8;
-const MAX_UPSTREAM_STORAGE_M = 180;
-const WORK_ZONE_SPEED_KMH = 60;
 const UPDATE_HZ = 5;
 
 const laneCenterY = (lane: number) =>
@@ -81,10 +89,15 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   weavingIndex = 0.2,
   language = 'en',
   heavyPct = 12,
+  workzoneSpeedKmh = Math.max(40, speedLimitKmh - 20),
+  storageM = 600,
+  scenarioLabel,
+  planningDelaySec,
+  planningQueueM,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [simSpeed, setSimSpeed] = useState<1 | 2>(1);
+  const [simSpeed, setSimSpeed] = useState<1 | 2 | 4 | 8>(2);
   const [resetToken, setResetToken] = useState(0);
   const [live, setLive] = useState<LiveStats>({
     throughputPce: 0,
@@ -100,7 +113,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   });
 
   const isPlayingRef = useRef(true);
-  const simSpeedRef = useRef<1 | 2>(1);
+  const simSpeedRef = useRef<1 | 2 | 4 | 8>(2);
   const languageRef = useRef(language);
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -138,6 +151,9 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     const avgPce = averagePce(heavyPct);
     const vehPerSec = pceToVehicleFlow(demandPce, heavyPct) / 3600;
     const meanInterArrival = vehPerSec > 0 ? 1 / vehPerSec : 1e9;
+    const upstreamStorageM = Math.max(120, storageM);
+    const postedSpeed = Math.max(8, speedLimitKmh / 3.6);
+    const wzSpeed = Math.max(8, workzoneSpeedKmh / 3.6);
 
     let simClock = 0;
     let nextArrival = exponential(rng, meanInterArrival);
@@ -223,7 +239,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       if (rear && rear.xM < ENTRY_M + 20) {
         x = rear.xM - (rear.lengthM / 2 + spec.minGapM + 1.5 + spec.lengthM / 2);
       }
-      if (x < -MAX_UPSTREAM_STORAGE_M) return; // upstream storage is full
+      if (x < -upstreamStorageM) return; // upstream storage is full
 
       const gaps = laneGapForInsertion(lane, x, spec.lengthM);
       if (gaps.behind < 1.2 || (Number.isFinite(gaps.ahead) && gaps.ahead < spec.minGapM)) {
@@ -362,8 +378,6 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         guard += 1;
       }
 
-      const wzSpeed = Math.min(speedLimitKmh, WORK_ZONE_SPEED_KMH) / 3.6;
-
       for (const veh of vehiclesRef.current) {
         veh.mergeCooldown = Math.max(0, veh.mergeCooldown - dtSim);
 
@@ -478,7 +492,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       const windowSec = Math.max(10, Math.min(60, simClock));
       const recent = completedRef.current.filter((c) => c.time >= simClock - 60);
       const throughput = (recent.reduce((s, c) => s + c.pce, 0) * 3600) / windowSec;
-      const warmup = simClock < 12 || totalCompletedRef.current < 5;
+      const warmup = simClock < 15 || totalCompletedRef.current < 20;
 
       let queueM = 0;
       for (let lane = 1; lane <= 4; lane += 1) {
@@ -490,12 +504,24 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           queueM = Math.max(queueM, Math.max(0, back));
         }
       }
+      // The queue may extend upstream beyond the visible 300 m window; it is
+      // still physically bounded by the storage to the previous exit.
+      queueM = Math.min(upstreamStorageM, queueM);
       peakQueueRef.current = Math.max(peakQueueRef.current, queueM);
 
-      const allCompleted = completedRef.current;
+      // Average delay over completed trips AND active trips' delay so far.
+      // Completed-only averages lag by minutes during oversaturation, when the
+      // queue is growing and the most-delayed vehicles have not exited yet.
+      const completedDelaySum = completedRef.current.reduce((s, c) => s + c.delay, 0);
+      const activeDelaySum = vehiclesRef.current.reduce((s, v) => {
+        const travelled = Math.max(0, v.xM - ENTRY_M);
+        const freeFlowTime = travelled / postedSpeed;
+        return s + Math.max(0, simClock - v.departTime - freeFlowTime);
+      }, 0);
+      const delaySampleCount = completedRef.current.length + vehiclesRef.current.length;
       const avgDelay =
-        allCompleted.length > 0
-          ? allCompleted.reduce((s, c) => s + c.delay, 0) / allCompleted.length
+        delaySampleCount > 0
+          ? (completedDelaySum + activeDelaySum) / delaySampleCount
           : 0;
       const avgSpeed =
         vehiclesRef.current.length > 0
@@ -625,7 +651,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       ctx.stroke();
       ctx.fillStyle = '#fbbf24';
       ctx.font = 'bold 11px JetBrains Mono, monospace';
-      ctx.fillText(`${WORK_ZONE_SPEED_KMH} km/h`, taperStartX + 13, ROAD_TOP - 13);
+      ctx.fillText(`${Math.round(workzoneSpeedKmh)} km/h`, taperStartX + 13, ROAD_TOP - 13);
 
       // Vehicles
       for (const v of vehiclesRef.current) {
@@ -684,7 +710,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [closedLanes, speedLimitKmh, demandPce, weavingIndex, heavyPct, resetToken]);
+  }, [closedLanes, speedLimitKmh, demandPce, weavingIndex, heavyPct, workzoneSpeedKmh, storageM, resetToken]);
 
   const measuredVc = capacityPce > 0 ? live.throughputPce / capacityPce : 0;
 
@@ -737,6 +763,11 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       </div>
 
       <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
+        {scenarioLabel && (
+          <div className="absolute top-2 right-2 z-10 max-w-[70%] rounded border border-cyan-500/30 bg-slate-950/85 px-2 py-1 text-[10px] font-mono text-cyan-300 backdrop-blur-sm">
+            {scenarioLabel}
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           width={W}
@@ -781,6 +812,31 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         </div>
       </div>
 
+      {(planningDelaySec !== undefined || planningQueueM !== undefined) && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-slate-500">
+          <span>
+            {language === 'ar' ? 'المرجع التحليلي للساعة:' : 'Analytical reference for this hour:'}
+          </span>
+          {planningDelaySec !== undefined && (
+            <span>
+              {language === 'ar' ? 'التأخير' : 'delay'}{' '}
+              <strong className="text-slate-300">{planningDelaySec.toFixed(1)} s/veh</strong>
+            </span>
+          )}
+          {planningQueueM !== undefined && (
+            <span>
+              {language === 'ar' ? 'الطابور' : 'queue'}{' '}
+              <strong className="text-slate-300">{planningQueueM.toFixed(0)} m</strong>
+            </span>
+          )}
+          <span className="text-slate-600">
+            {language === 'ar'
+              ? `· مخزن المنبع ${Math.round(storageM)} م`
+              : `· upstream storage ${Math.round(storageM)} m`}
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between mt-2.5 gap-2 text-xs text-slate-400">
         <span>
           {language === 'ar' ? 'الطلب:' : 'Demand:'} <strong className="text-cyan-400">{Math.round(demandPce).toLocaleString()}</strong> PCE/h
@@ -799,10 +855,10 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
             {live.active} active · {live.completed} trips · {live.laneChanges} lane changes
           </span>
           <span>{language === 'ar' ? 'سرعة المحاكاة:' : 'Sim speed:'}</span>
-          {[1, 2].map((s) => (
+          {[1, 2, 4, 8].map((s) => (
             <button
               key={s}
-              onClick={() => setSimSpeed(s as 1 | 2)}
+              onClick={() => setSimSpeed(s as 1 | 2 | 4 | 8)}
               className={`px-2 py-0.5 rounded text-[11px] font-mono ${
                 simSpeed === s ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
               }`}

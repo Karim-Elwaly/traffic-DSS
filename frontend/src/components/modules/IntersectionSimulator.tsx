@@ -87,8 +87,8 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           </div>
           <input
             type="range"
-            min={1000}
-            max={5000}
+            min={500}
+            max={7000}
             step={100}
             value={mainFlow}
             onChange={(e) => setMainFlow(parseInt(e.target.value))}
@@ -104,8 +104,8 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           </div>
           <input
             type="range"
-            min={300}
-            max={2500}
+            min={100}
+            max={3500}
             step={50}
             value={crossFlow}
             onChange={(e) => setCrossFlow(parseInt(e.target.value))}
@@ -122,7 +122,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           <input
             type="range"
             min={5}
-            max={40}
+            max={45}
             step={1}
             value={turningPct}
             onChange={(e) => setTurningPct(parseInt(e.target.value))}
@@ -138,8 +138,8 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           </div>
           <input
             type="range"
-            min={5}
-            max={35}
+            min={2}
+            max={40}
             step={1}
             value={heavyPct}
             onChange={(e) => setHeavyPct(parseInt(e.target.value))}
@@ -155,8 +155,8 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           </div>
           <input
             type="range"
-            min={200}
-            max={800}
+            min={150}
+            max={1000}
             step={50}
             value={uturnDist}
             onChange={(e) => setUturnDist(parseInt(e.target.value))}

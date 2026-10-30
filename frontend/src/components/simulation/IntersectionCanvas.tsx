@@ -5,7 +5,6 @@ import {
   RefreshCw,
   GitCompare,
   Eye,
-  Sliders,
   Flame,
   CheckCircle2,
   Gauge,
@@ -88,6 +87,8 @@ interface LiveMetrics {
   uturnLos: Los;
   /** True until at least one full signal cycle has elapsed. */
   warmup: boolean;
+  /** True until the U-turn stream has accumulated a stable sample. */
+  uturnWarmup: boolean;
 }
 
 const W = 640;
@@ -134,6 +135,7 @@ const initialLive: LiveMetrics = {
   uturnSpeed: 0,
   uturnLos: 'A',
   warmup: true,
+  uturnWarmup: true,
 };
 
 function bezier(
@@ -170,7 +172,6 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   const [simSpeed, setSimSpeed] = useState<1 | 2 | 4>(2);
   const [showConflicts, setShowConflicts] = useState(true);
   const [enableHeadlights, setEnableHeadlights] = useState(true);
-  const [trafficPreset, setTrafficPreset] = useState<'normal' | 'peak' | 'heavy'>('peak');
   const [live, setLive] = useState<LiveMetrics>(initialLive);
   const [resetToken, setResetToken] = useState(0);
 
@@ -192,9 +193,10 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
     enableHeadlightsRef.current = enableHeadlights;
   }, [enableHeadlights]);
 
-  const flowMultiplier = trafficPreset === 'normal' ? 0.75 : trafficPreset === 'peak' ? 1.0 : 1.35;
-  const effectiveMainFlow = mainFlow * flowMultiplier;
-  const effectiveCrossFlow = crossFlow * flowMultiplier;
+  // The live canvas must consume exactly the same demand as the analytical
+  // table and the UI sliders. A hidden density multiplier disconnected the two.
+  const effectiveMainFlow = mainFlow;
+  const effectiveCrossFlow = crossFlow;
 
   // -------------------------------------------------------------------------
   // Main simulation loop. Re-initialised only when the scenario inputs or the
@@ -902,7 +904,15 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           (v.stream === 'south' && v.y > H + 60) ||
           (v.stream === 'north' && v.y < -60);
         if (done) {
-          const freeFlow = ((W + 90) / (v.stream === 'east' || v.stream === 'west' ? MAIN_SPEED_PX : CROSS_SPEED_PX));
+          // The cross street runs vertically, so its free-flow distance is the
+          // canvas height (plus off-screen margins), not the canvas width.
+          const freeFlowDistance =
+            v.stream === 'east' || v.stream === 'west' ? W + 90 : H + 90;
+          const freeFlow =
+            freeFlowDistance /
+            (v.stream === 'east' || v.stream === 'west'
+              ? MAIN_SPEED_PX
+              : CROSS_SPEED_PX);
           completedSignal.push({
             time: simTime,
             delay: Math.max(0, simTime - v.departTime - freeFlow),
@@ -972,13 +982,29 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       // the initial queue is a warm-up artifact, not a steady-state condition.
       const warmup = simTime < cycleSec || completedSignal.length < 20;
 
+      const freeFlowToPosition = (v: SimVehicle): number => {
+        if (v.stream === 'east') {
+          return Math.max(0, v.x - ENTRY.east.x) / MAIN_SPEED_PX;
+        }
+        if (v.stream === 'west') {
+          return Math.max(0, ENTRY.west.x - v.x) / MAIN_SPEED_PX;
+        }
+        if (v.stream === 'south') {
+          return Math.max(0, v.y - ENTRY.south.y) / CROSS_SPEED_PX;
+        }
+        return Math.max(0, ENTRY.north.y - v.y) / CROSS_SPEED_PX;
+      };
+
       const completedDelay = completedSignal.reduce((s, c) => s + c.delay, 0);
-      const activeStopped = signalVehicles.reduce((s, v) => s + v.stoppedTime, 0);
+      const activeDelay = signalVehicles.reduce(
+        (s, v) =>
+          s + Math.max(0, simTime - v.departTime - freeFlowToPosition(v)),
+        0
+      );
+      const delaySampleCount = completedSignal.length + signalVehicles.length;
       const signalDelay =
-        completedSignal.length > 0
-          ? completedDelay / completedSignal.length
-          : signalVehicles.length > 0
-          ? activeStopped / signalVehicles.length
+        delaySampleCount > 0
+          ? (completedDelay + activeDelay) / delaySampleCount
           : 0;
 
       let uturnQueueM = 0;
@@ -988,11 +1014,17 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         uturnSpeedSum += v.speed;
         if (v.stream === 'loop' || v.stream === 'side') uturnActive += 1;
         if (v.speed < 2) {
-          const back = v.stream === 'west' ? Math.max(0, 460 - v.x) : Math.max(0, v.x - 180);
-          uturnQueueM = Math.max(uturnQueueM, back / PX_PER_M);
+          // Measure the physical queue back from the U-turn opening (eastbound
+          // approach), the side-street stop line, or the westbound merge. The
+          // old `x - 180` formula invented ~270 m for one vehicle near the loop.
+          let backPx = 0;
+          if (v.stream === 'east') backPx = Math.max(0, 455 - v.x);
+          else if (v.stream === 'west' && v.x > 455) backPx = v.x - 455;
+          else if (v.stream === 'side') backPx = Math.max(0, 92 - v.y);
+          uturnQueueM = Math.max(uturnQueueM, backPx / PX_PER_M);
         }
       }
-      const uturnWindow = Math.max(10, Math.min(60, simTime));
+      uturnQueueM = Math.min(600, uturnQueueM);
       const completedUturnDelay = completedUturn.reduce((s, c) => s + c.delay, 0);
       const uturnDelay =
         completedUturn.length > 0
@@ -1004,7 +1036,19 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         uturnVehicles.length > 0
           ? (uturnSpeedSum / uturnVehicles.length / PX_PER_M) * 3.6
           : 0;
-      void uturnWindow;
+      const uturnWarmup = simTime < 30 || completedUturn.length < 20;
+      const heavyRatio = Math.max(0, Math.min(0.5, heavyPct / 100));
+      const uturnCapacity =
+        (4 * 1900 + 1200) * Math.max(0.7, 1 - 0.5 * heavyRatio);
+      const uturnVc =
+        (effectiveMainFlow + effectiveCrossFlow) / Math.max(1, uturnCapacity);
+
+      const signalLos: Los =
+        timing.vcMain > 1.0 || timing.vcCross > 1.0
+          ? 'F'
+          : losFromDelay(signalDelay, true);
+      const uturnLos: Los =
+        uturnVc > 1.0 ? 'F' : losFromDelay(uturnDelay, false);
 
       return {
         phase: phase.name,
@@ -1019,12 +1063,13 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             : 0,
         warmup,
         signalThroughput: Math.round(signalThroughput),
-        signalLos: losFromDelay(signalDelay, true),
+        signalLos,
         uturnActive,
         uturnQueueM: Math.round(uturnQueueM),
         uturnDelay: Math.round(uturnDelay * 10) / 10,
         uturnSpeed: Math.round(uturnSpeed * 10) / 10,
-        uturnLos: losFromDelay(uturnDelay, false),
+        uturnLos,
+        uturnWarmup,
       };
     };
 
@@ -1414,7 +1459,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   };
 
   const liveDelayReduction =
-    !live.warmup && live.signalDelay > 0
+    !live.warmup && !live.uturnWarmup && live.signalDelay > 0
       ? Math.max(0, ((live.signalDelay - live.uturnDelay) / live.signalDelay) * 100)
       : 0;
 
@@ -1475,26 +1520,6 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center bg-slate-950 rounded-lg p-1 border border-slate-800 text-xs">
-            <span className="text-[11px] text-slate-400 px-2 flex items-center gap-1">
-              <Sliders className="w-3 h-3 text-cyan-400" />
-              {isAr ? 'الكثافة:' : 'Density:'}
-            </span>
-            {(['normal', 'peak', 'heavy'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setTrafficPreset(mode)}
-                className={`px-2.5 py-1 rounded text-xs font-semibold transition ${
-                  trafficPreset === mode
-                    ? 'bg-cyan-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                {mode === 'normal' ? (isAr ? 'عادية' : 'Normal') : mode === 'peak' ? (isAr ? 'ذروة' : 'Peak') : isAr ? 'مزدحمة' : 'Heavy'}
-              </button>
-            ))}
-          </div>
-
           <div className="flex items-center bg-slate-950 rounded-lg p-1 border border-slate-800 text-xs font-mono">
             {([1, 2, 4] as const).map((spd) => (
               <button
@@ -1645,7 +1670,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
                   {isAr ? '٤ نقاط اندماج آمنة' : '4 Safe Merging Nodes'}
                 </span>
                 <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(live.uturnLos)}`}>
-                  LOS {live.uturnLos}
+                  LOS {live.uturnWarmup ? '—' : live.uturnLos}
                 </span>
               </div>
             </div>
@@ -1657,7 +1682,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
                 <span className="text-emerald-300 font-semibold">
                   {isAr ? 'حركة حرة مستمرة (بدون إشارات توقف)' : 'Continuous Free Flow (0 Stop Lights)'}
                 </span>
-                <span className="text-emerald-400 font-bold ml-1">{live.uturnSpeed.toFixed(0)} km/h</span>
+                <span className="text-emerald-400 font-bold ml-1">{live.uturnWarmup ? '—' : `${live.uturnSpeed.toFixed(0)} km/h`}</span>
               </div>
               <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg text-slate-300">
                 <span className="text-slate-400">{isAr ? 'مركبات في الدوران: ' : 'Loop In-Flight: '}</span>
@@ -1670,21 +1695,25 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'متوسط التأخير' : 'Avg Delay'}</span>
               <span className="text-xs font-bold text-emerald-400 font-mono">
-                {live.uturnDelay.toFixed(1)} s/veh
-                {liveDelayReduction > 0 && (
+                {live.uturnWarmup ? '—' : `${live.uturnDelay.toFixed(1)} s/veh`}
+                {!live.uturnWarmup && liveDelayReduction > 0 && (
                   <span className="text-emerald-500/80"> (-{liveDelayReduction.toFixed(0)}%)</span>
                 )}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
-              <span className="text-xs font-bold text-emerald-400 font-mono">{live.uturnQueueM} m</span>
+              <span className="text-xs font-bold text-emerald-400 font-mono">
+                {live.uturnWarmup ? '—' : `${live.uturnQueueM} m`}
+              </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
                 <Gauge className="w-3 h-3" /> {isAr ? 'السرعة' : 'Speed'}
               </span>
-              <span className="text-xs font-bold text-emerald-400 font-mono">{live.uturnSpeed.toFixed(1)} km/h</span>
+              <span className="text-xs font-bold text-emerald-400 font-mono">
+                {live.uturnWarmup ? '—' : `${live.uturnSpeed.toFixed(1)} km/h`}
+              </span>
             </div>
           </div>
         </div>

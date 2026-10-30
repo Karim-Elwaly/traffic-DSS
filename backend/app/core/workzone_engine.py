@@ -595,6 +595,7 @@ def optimize_workzone_schedule(
         workzone_capacity=round(c_wz, 1),
         capacity_drop_pct=capacity_drop_pct,
         heavy_vehicle_percentage=round(avg_heavy_ratio * 100.0, 1),
+        upstream_exit_distance_m=upstream_exit_distance_m,
         hourly_curves=hourly_curves,
         optimal_windows=optimal_windows,
         worst_window=worst_window,

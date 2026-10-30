@@ -25,15 +25,24 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     Simulates dynamic lane reallocation (5+3) against baseline (4+4)
     and computes Green Wave synchronization offsets.
 
-    Delay follows a BPR-style oversaturation term and is capped at 600 s so a
-    slider extreme cannot produce an unbounded ``inbound_delay``. Queue and
-    flush estimates are capped by the physical corridor storage.
+    Delay is derived from the travel-time difference between the congested
+    speed and the free-flow speed, so ``inbound_delay`` and
+    ``travel_time_saved_pct`` can never contradict each other. It is capped at
+    600 s. Queue and flush estimates are capped by the physical corridor
+    storage. A 5+3 reallocation is viable when the outbound direction keeps a
+    safe v/c margin and the inbound travel time actually improves.
     """
     total_flow = request.inbound_flow + request.outbound_flow
     split_pct = (request.inbound_flow / max(1.0, total_flow)) * 100.0
+    free_flow_speed_kmh = 75.0
+    free_flow_time_min = (
+        request.corridor_length_km / free_flow_speed_kmh
+    ) * 60.0
 
-    def bounded_delay(vc_ratio: float) -> float:
-        return max(0.0, min(600.0, (vc_ratio - 0.75) * 220.0))
+    def travel_delay_sec(travel_time_min: float) -> float:
+        # Delay is the extra time spent relative to a free-flow trip over the
+        # same corridor, capped for slider extremes.
+        return max(0.0, min(600.0, (travel_time_min - free_flow_time_min) * 60.0))
 
     # -----------------------------------------------------------------------
     # Baseline Configuration: Standard 4 Inbound / 4 Outbound
@@ -49,7 +58,7 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         75.0 * (1.0 - 0.75 * max(0.0, std_in_vc - 0.65)),
     )
     std_in_time_min = (request.corridor_length_km / std_in_speed) * 60.0
-    std_in_delay = bounded_delay(std_in_vc)
+    std_in_delay = travel_delay_sec(std_in_time_min)
     std_out_safety = max(0.0, min(100.0, (1.0 - std_out_vc) * 100.0))
 
     config_std = ReversibleConfigMetric(
@@ -80,11 +89,13 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         75.0 * (1.0 - 0.75 * max(0.0, rev_in_vc - 0.65)),
     )
     rev_in_time_min = (request.corridor_length_km / rev_in_speed) * 60.0
-    rev_in_delay = bounded_delay(rev_in_vc)
+    rev_in_delay = travel_delay_sec(rev_in_time_min)
     rev_out_safety = max(0.0, min(100.0, (1.0 - rev_out_vc) * 100.0))
-    # Reversible operation is only viable when neither direction is
-    # oversaturated and the reduced outbound direction keeps a safety margin.
-    rev_is_viable = rev_out_vc < 0.85 and rev_in_vc <= 1.0
+    # Reversible operation is viable when the direction that loses a lane
+    # retains a safe margin and the inbound direction is genuinely improved.
+    # Inbound v/c may still exceed 1.0 at extreme surges; that is reported as a
+    # residual oversaturation warning rather than used to veto an improvement.
+    rev_is_viable = rev_out_vc < 0.85 and rev_in_vc < std_in_vc
 
     config_rev = ReversibleConfigMetric(
         configuration_name="Dynamic Reversible 5+3 Lanes",
@@ -194,26 +205,53 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
 
     # Executive Summaries
     if recommended_mode == "REVERSIBLE_5_3":
+        residual_en = (
+            f" Inbound demand remains above capacity at v/c {rev_in_vc:.2f}; "
+            "pair the reallocation with upstream metering or demand management."
+            if rev_in_vc > 1.0
+            else ""
+        )
+        residual_ar = (
+            f" لا يزال الطلب الداخل فوق السعة بنسبة استيعاب {rev_in_vc:.2f}؛ "
+            "يجب دمج إعادة التوزيع مع تنظيم التدفق من المنبع أو إدارة الطلب."
+            if rev_in_vc > 1.0
+            else ""
+        )
         exec_en = (
             f"RECOMMENDATION: ACTIVATE REVERSIBLE 5+3 CONFIGURATION. Directional surge is {split_pct:.1f}% Inbound. "
             f"Adding 5th inbound lane expands throughput to 8,850 PCE/h, increasing average travel speed from "
-            f"{std_in_speed:.1f} to {rev_in_speed:.1f} km/h (saving {time_saved_pct:.1f}% travel time). "
-            f"Outbound capacity remains secure with a {rev_out_safety:.1f}% safety buffer."
+            f"{std_in_speed:.1f} to {rev_in_speed:.1f} km/h (saving {time_saved_pct:.1f}% travel time and "
+            f"{delay_saved_pct:.1f}% of the inbound delay). Outbound capacity remains secure with a "
+            f"{rev_out_safety:.1f}% safety buffer.{residual_en}"
         )
         exec_ar = (
             f"توصية العمليات: تفعيل نظام الحارة الترددية (5 للداخل / 3 للخارج). نسبة المدخل تصل إلى {split_pct:.1f}%. "
             f"تخصيص الحارة الخامسة يرفع سعة التدفق إلى 8,850 م.ر/س، مما يرفع متوسط السرعة من {std_in_speed:.1f} إلى "
-            f"{rev_in_speed:.1f} كم/س (توفير {time_saved_pct:.1f}% من زمن الرحلة) مع بقاء هامش أمان {rev_out_safety:.1f}% للاتجاه المعاكس."
+            f"{rev_in_speed:.1f} كم/س (توفير {time_saved_pct:.1f}% من زمن الرحلة و{delay_saved_pct:.1f}% من تأخير المدخل) "
+            f"مع بقاء هامش أمان {rev_out_safety:.1f}% للاتجاه المعاكس.{residual_ar}"
         )
     else:
+        oversat_en = (
+            f" The inbound direction is already oversaturated at v/c {std_in_vc:.2f}; "
+            "the opposing flow leaves insufficient headroom for a safe 5+3 reallocation, "
+            "so upstream metering or demand management is required."
+            if std_in_vc > 1.0
+            else ""
+        )
+        oversat_ar = (
+            f" الاتجاه الداخل مشبع بالفعل بنسبة استيعاب {std_in_vc:.2f}؛ ولا يترك التدفق المعاكس هامشاً آمناً "
+            "لإعادة توزيع 5+3، لذا يلزم تنظيم التدفق من المنبع أو إدارة الطلب."
+            if std_in_vc > 1.0
+            else ""
+        )
         exec_en = (
             f"RECOMMENDATION: MAINTAIN STANDARD 4+4 LANES. Directional split ({split_pct:.1f}%) does not exceed the "
             f"68% activation threshold with a standard outbound v/c below 0.45, so barrier reallocation is not warranted "
-            f"without penalizing the opposing direction."
+            f"without penalizing the opposing direction.{oversat_en}"
         )
         exec_ar = (
             f"توصية العمليات: الإبقاء على التوزيع المتوازن (4 حارات لكل اتجاه). نسبة التدفق ({split_pct:.1f}%) لم تتجاوز "
-            f"الحد الأدنى (68%) مع نسبة استيعاب للاتجاه المعاكس أقل من 0.45، لذا لا يبرر تعديل الحواجز حالياً."
+            f"الحد الأدنى (68%) مع نسبة استيعاب للاتجاه المعاكس أقل من 0.45، لذا لا يبرر تعديل الحواجز حالياً.{oversat_ar}"
         )
 
     return ReversibleResponse(

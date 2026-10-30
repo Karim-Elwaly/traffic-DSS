@@ -93,7 +93,11 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
     open_lanes_total = 2 * (MAIN_LANES_PER_DIRECTION + CROSS_LANES_PER_DIRECTION)
     c_open = 900.0 * open_lanes_total * turn_factor * max(0.75, 1.0 - 0.25 * heavy_ratio)
     vc_open = total_flow / max(1.0, c_open)
-    d_open = 9.5 + 28.0 * (min(vc_open, 3.0) ** 2.6)
+    # An uncontrolled junction has no signal protection, so once total demand
+    # approaches the gap-acceptance capacity the delay grows like an HCM
+    # unsignalized approach. The old BPR-style power curve was too shallow
+    # (98 s at v/c 1.56) and let a gridlocked open junction outscore a signal.
+    d_open = 9.5 + _incremental_delay(c_open, vc_open)
     q_open_veh = (
         1.6 * (total_flow / 3600.0) * d_open
         + max(0.0, total_flow - c_open) * ANALYSIS_PERIOD_H

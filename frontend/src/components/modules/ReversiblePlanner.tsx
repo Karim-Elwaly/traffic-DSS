@@ -69,7 +69,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
           <input
             type="range"
             min={1000}
-            max={8500}
+            max={9000}
             step={100}
             value={inboundFlow}
             onChange={(e) => setInboundFlow(parseInt(e.target.value))}
@@ -85,8 +85,8 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
           </div>
           <input
             type="range"
-            min={800}
-            max={6500}
+            min={500}
+            max={7000}
             step={100}
             value={outboundFlow}
             onChange={(e) => setOutboundFlow(parseInt(e.target.value))}

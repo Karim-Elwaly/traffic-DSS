@@ -130,6 +130,7 @@ export interface WorkZoneResponse {
   workzone_capacity: number;
   capacity_drop_pct: number;
   heavy_vehicle_percentage: number;
+  upstream_exit_distance_m: number;
   hourly_curves: HourlyWorkZoneDetail[];
   optimal_windows: WindowOption[];
   worst_window: WindowOption;
