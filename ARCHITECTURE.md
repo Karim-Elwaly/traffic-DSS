@@ -99,12 +99,12 @@ traffic-dss-platform/
 │   │   │   ├── synthetic_seeder.py  # 3 Egyptian Corridors x 4 Lanes x 7 Days x 24 Hours
 │   │   │   └── cv_ingestion.py      # Edge YOLOv8/v11 + ByteTrack ingestion pipeline
 │   │   ├── sumo/
-│   │   │   ├── networks/            # 4 Cairo geometric networks XML & base.sumocfg
+│   │   │   ├── networks/            # 5 SUMO networks XML (4 intersections + 4-lane highway) & base.sumocfg
 │   │   │   ├── generator.py         # Multi-class heterogeneous vehicle & route generator
 │   │   │   ├── runner.py            # TraCI runtime execution & microscopic metric extractor
 │   │   │   └── service.py           # Hybrid Digital Twin orchestrator & fallback
 │   │   └── api/
-│   │       └── routes.py            # 10 REST API endpoints (HCM + SUMO Digital Twin)
+│   │       └── routes.py            # 12 REST API endpoints (HCM + SUMO Digital Twin)
 │   └── tests/
 │       ├── test_engines.py          # Unit tests for all 4 mathematical engines
 │       ├── test_api.py              # FastAPI TestClient integration test suite
@@ -311,7 +311,19 @@ Both simulation canvases ([HighwayCanvas.tsx](file:///d:/projects/traffic_dss/fr
    - **Description:** Calculates LWR backward shockwave speed, countdown to upstream exit blockage, and 60-min queue expansion trajectory.
 
 7. `POST /api/dss/reversible-evaluate`
-   - **Description:** Evaluates directional split, 4+4 vs 5+3 reversible reallocation, and 5-intersection Green Wave offsets.
+   - **Description:** Evaluates directional split, 4+4 vs 5+3 reversible reallocation, and configurable-node Green Wave offsets at 450 m spacing.
 
 8. `POST /api/cv/ingest`
    - **Description:** Ingests live edge YOLO + ByteTrack counts and updates active corridor state.
+
+9. `GET /api/dss/sumo/status`
+   - **Description:** Reports native SUMO/TraCI availability, binary paths, `SUMO_HOME`, and generated network files.
+
+10. `POST /api/dss/sumo/workzone-simulate`
+    - **Description:** Runs a microscopic highway bottleneck simulation using the selected day/hour's seeded telemetry demand (peak hour by default).
+
+11. `POST /api/dss/sumo/intersection-simulate`
+    - **Description:** Forces SUMO/TraCI execution across all four intersection alternatives.
+
+12. `POST /api/dss/sumo/launch-gui?scenario={intersection|workzone}&alt_id={OPEN|SIGNAL|UTURN|ROUNDABOUT}`
+    - **Description:** Launches the native desktop SUMO-GUI for live visual inspection of a scenario.

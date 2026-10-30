@@ -219,6 +219,12 @@ def run_sumo_simulation(inputs: IntersectionRequest) -> IntersectionResponse:
         takeaway_en = f"Implement {recommended_id} configuration based on microscopic vehicle delay optimization."
         takeaway_ar = f"اعتماد تكوين {recommended_id} بناءً على تحسين أزمنة التأخير المجهرية للمركبات."
 
+    engine_used = (
+        "SUMO / TraCI (C++ Microscopic Core)"
+        if res_open.get("is_native_sumo")
+        else "SUMO Digital Twin (Calibrated Micro-Emulation)"
+    )
+
     return IntersectionResponse(
         inputs=inputs,
         alternatives=alternatives,
@@ -227,4 +233,5 @@ def run_sumo_simulation(inputs: IntersectionRequest) -> IntersectionResponse:
         recommendation_rationale_ar=rationale_ar,
         executive_takeaway_en=takeaway_en,
         executive_takeaway_ar=takeaway_ar,
+        engine_used=engine_used,
     )

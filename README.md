@@ -73,7 +73,7 @@ traffic-dss-platform/
 │   │   │   ├── synthetic_seeder.py    # Pre-seeds 3 Egyptian Corridors x 7d x 24h
 │   │   │   └── cv_ingestion.py        # Live YOLO/ByteTrack webhook
 │   │   ├── sumo/
-│   │   │   ├── networks/              # 4 Cairo geometric networks XML & base.sumocfg
+│   │   │   ├── networks/              # 5 SUMO networks XML (4 intersections + 4-lane highway) & base.sumocfg
 │   │   │   ├── generator.py           # Multi-class heterogeneous vehicle & route generator
 │   │   │   ├── runner.py              # TraCI runtime execution & microscopic metric extractor
 │   │   │   └── service.py             # Hybrid Digital Twin orchestrator & fallback
@@ -156,4 +156,36 @@ npm run dev
 
 # FastAPI REST endpoints, CV live-state ingestion, requested-window API
 .venv\Scripts\python -m pytest backend/tests/test_api.py -v
+
+# Native SUMO / TraCI networks and microscopic simulations
+.venv\Scripts\python -m pytest backend/tests/test_sumo.py -v
+
+# Complete suite
+.venv\Scripts\python -m pytest backend/tests -q
 ```
+
+---
+
+## Optional SUMO / TraCI Digital Twin
+
+The analytical HCM/Webster/LWR engines are always available. If Eclipse SUMO
+and the `traci`/`sumolib` Python packages are installed, the platform also runs
+vehicle-by-vehicle microscopic simulations through the native C++ SUMO core:
+
+```bash
+winget install Eclipse.SUMO
+.venv\Scripts\python -m pip install -r backend/requirements.txt
+```
+
+- `GET /api/dss/sumo/status` reports the discovered `sumo.exe`, `sumo-gui.exe`,
+  `SUMO_HOME`, TraCI availability, and the five generated networks.
+- Add `"engine_mode": "sumo"` to `/api/dss/workzone-optimize`,
+  `/api/dss/intersection-simulate`, or `/api/dss/shockwave-predict` to attach
+  microscopic telemetry to the analytical decision output.
+- Dedicated endpoints: `POST /api/dss/sumo/workzone-simulate` (uses the seeded
+  demand for `target_start_hour`, or the selected day's peak hour when omitted)
+  and `POST /api/dss/sumo/intersection-simulate`.
+- `POST /api/dss/sumo/launch-gui?scenario=intersection&alt_id=SIGNAL` opens the
+  native desktop SUMO-GUI for live visual inspection.
+- When SUMO is not installed, the APIs return an explicitly labelled calibrated
+  micro-emulation fallback (`is_native_sumo: false`) instead of silently failing.

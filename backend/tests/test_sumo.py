@@ -25,12 +25,13 @@ from backend.app.sumo.service import run_sumo_simulation, get_sumo_system_status
 
 
 def test_sumo_network_files_exist():
-    """Verify all 4 Cairo geometric network XML files and base config exist."""
+    """Verify the intersection network XML files, highway network, and base config exist."""
     required_files = [
         "open_intersection.net.xml",
         "signal_intersection.net.xml",
         "uturn_corridor.net.xml",
         "roundabout.net.xml",
+        "highway_4lane.net.xml",
         "base.sumocfg",
     ]
     for filename in required_files:
@@ -79,7 +80,11 @@ def test_sumo_micro_simulation_all_alternatives():
             duration_sec=300,
         )
         assert res["average_delay_sec"] > 0.0
-        assert res["queue_95th_m"] > 0.0
+        # Free-flow geometries (open intersection and protected U-turn) can
+        # legitimately have zero fully-stopped vehicles at moderate demand.
+        assert res["queue_95th_m"] >= 0.0
+        if alt in ("SIGNAL", "ROUNDABOUT"):
+            assert res["queue_95th_m"] > 0.0
         assert res["simulated_vehicles_count"] > 0
         assert res["mean_speed_kmh"] > 0.0
         assert res["co2_emissions_kg_h"] > 0.0
@@ -120,7 +125,15 @@ def test_sumo_api_endpoints():
     assert res_status.status_code == 200
     data_status = res_status.json()
     assert "networks_ready" in data_status
-    assert len(data_status["networks_ready"]) == 4
+    assert len(data_status["networks_ready"]) == 5
+    for net in (
+        "open_intersection.net.xml",
+        "signal_intersection.net.xml",
+        "uturn_corridor.net.xml",
+        "roundabout.net.xml",
+        "highway_4lane.net.xml",
+    ):
+        assert net in data_status["networks_ready"]
 
     # 2. POST /api/dss/intersection-simulate with engine_mode='sumo'
     payload = {
@@ -137,6 +150,7 @@ def test_sumo_api_endpoints():
     data_sim = res_sim.json()
     assert len(data_sim["alternatives"]) == 4
     assert data_sim["alternatives"][0]["sumo_metrics"] is not None
+    assert data_sim["engine_used"].startswith("SUMO")
 
     # 3. POST /api/dss/sumo/intersection-simulate
     res_direct = client.post("/api/dss/sumo/intersection-simulate", json=payload)

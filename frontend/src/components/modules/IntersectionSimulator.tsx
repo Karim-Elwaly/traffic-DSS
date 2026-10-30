@@ -66,6 +66,25 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
     }
   };
 
+  const winnerAlt = data?.alternatives.find(
+    (a) => a.id === data.recommended_option_id
+  );
+  const signalAlt = data?.alternatives.find((a) => a.id === 'SIGNAL');
+  const sumoVehicles = data?.alternatives[0]?.sumo_metrics?.simulated_vehicles_count;
+  const winnerCo2 = winnerAlt?.sumo_metrics?.co2_emissions_kg_h;
+  const signalFuel = signalAlt?.sumo_metrics?.fuel_consumption_liters_h;
+  const winnerFuel = winnerAlt?.sumo_metrics?.fuel_consumption_liters_h;
+  const signalTimeLoss = signalAlt?.sumo_metrics?.total_time_loss_sec;
+  const winnerTimeLoss = winnerAlt?.sumo_metrics?.total_time_loss_sec;
+  const fuelSaved =
+    signalFuel != null && winnerFuel != null
+      ? Math.max(0, Math.round(signalFuel - winnerFuel))
+      : null;
+  const timeLossSaved =
+    signalTimeLoss != null && winnerTimeLoss != null
+      ? Math.max(0, Math.round((signalTimeLoss - winnerTimeLoss) / 3600))
+      : null;
+
   return (
     <div className="space-y-6">
       {/* Header with Engine Switcher */}
@@ -389,13 +408,13 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
                       {engineMode === 'sumo' && (
                         <>
                           <td className="py-3.5 px-3 text-center font-mono text-emerald-400">
-                            {alt.sumo_metrics?.mean_speed_kmh ?? Math.round(Math.max(14, 65 - alt.average_delay_sec * 0.4) * 10) / 10} km/h
+                            {alt.sumo_metrics?.mean_speed_kmh ?? '—'} km/h
                           </td>
                           <td className="py-3.5 px-3 text-center font-mono text-slate-300">
-                            {alt.sumo_metrics?.co2_emissions_kg_h ?? Math.round(((mainFlow + crossFlow) * (alt.id === 'UTURN' ? 210 : alt.id === 'SIGNAL' ? 320 : 260)) / 1000)} kg/h
+                            {alt.sumo_metrics?.co2_emissions_kg_h ?? '—'} kg/h
                           </td>
                           <td className="py-3.5 px-3 text-center font-mono text-slate-300">
-                            {alt.sumo_metrics?.fuel_consumption_liters_h ?? Math.round(((alt.sumo_metrics?.co2_emissions_kg_h ?? 200) * 0.42))} L/h
+                            {alt.sumo_metrics?.fuel_consumption_liters_h ?? '—'} L/h
                           </td>
                         </>
                       )}
@@ -413,45 +432,28 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             title={isAr ? 'المركبات المجهرية المحاكاة' : 'Simulated Micro-Vehicles'}
-            value={data.alternatives[0]?.sumo_metrics?.simulated_vehicles_count.toLocaleString() || '1,200'}
+            value={sumoVehicles != null ? sumoVehicles.toLocaleString() : '—'}
             unit={isAr ? 'مركبة' : 'veh'}
             status="info"
             subtitle={isAr ? 'معدل تدفق الحساب المجهري' : '300s TraCI Step Horizon'}
           />
           <KpiCard
             title={isAr ? 'انبعاثات الكربون للبديل الفائز' : 'Winning Solution CO2'}
-            value={data.alternatives.find((a) => a.id === data.recommended_option_id)?.sumo_metrics?.co2_emissions_kg_h || 180}
+            value={winnerCo2 ?? '—'}
             unit="kg/h"
             status="optimal"
             subtitle={isAr ? 'نموذج انبعاثات HBEFA3' : 'HBEFA3 Micro-Emission Model'}
           />
           <KpiCard
             title={isAr ? 'وفر الوقود مقارنة بالإشارة' : 'Fuel Saved vs Signal'}
-            value={
-              Math.max(
-                0,
-                Math.round(
-                  ((data.alternatives.find((a) => a.id === 'SIGNAL')?.sumo_metrics?.fuel_consumption_liters_h || 120) -
-                    (data.alternatives.find((a) => a.id === data.recommended_option_id)?.sumo_metrics?.fuel_consumption_liters_h || 80))
-                )
-              )
-            }
+            value={fuelSaved ?? '—'}
             unit="L/h"
             status="optimal"
             subtitle={isAr ? 'تقليل التوقف والتشغيل المستمر' : 'Reduced Stop-and-Go Idling'}
           />
           <KpiCard
             title={isAr ? 'وفر زمن التأخير الإجمالي' : 'Total Time Loss Saved'}
-            value={
-              Math.max(
-                0,
-                Math.round(
-                  ((data.alternatives.find((a) => a.id === 'SIGNAL')?.sumo_metrics?.total_time_loss_sec || 50000) -
-                    (data.alternatives.find((a) => a.id === data.recommended_option_id)?.sumo_metrics?.total_time_loss_sec || 15000)) /
-                    3600
-                )
-              )
-            }
+            value={timeLossSaved ?? '—'}
             unit={isAr ? 'ساعة ركاب/س' : 'hrs/h'}
             status="optimal"
             subtitle={isAr ? 'حسابات TraCI TimeLoss' : 'TraCI Trajectory Calculus'}

@@ -8,10 +8,11 @@ interface KpiCardProps {
     value: number;
     isGood: boolean;
   };
-  status?: 'normal' | 'warning' | 'critical' | 'success';
+  status?: 'normal' | 'warning' | 'critical' | 'success' | 'info' | 'optimal';
   los?: string;
   icon?: React.ReactNode;
   description?: string;
+  subtitle?: string;
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({
@@ -23,15 +24,19 @@ export const KpiCard: React.FC<KpiCardProps> = ({
   los,
   icon,
   description,
+  subtitle,
 }) => {
   const getStatusStyles = () => {
     switch (status) {
       case 'success':
+      case 'optimal':
         return 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400';
       case 'warning':
         return 'border-amber-500/30 bg-amber-950/20 text-amber-400';
       case 'critical':
         return 'border-rose-500/30 bg-rose-950/20 text-rose-400';
+      case 'info':
+        return 'border-cyan-500/30 bg-cyan-950/20 text-cyan-400';
       default:
         return 'border-slate-800 bg-slate-900/90 text-cyan-400';
     }
@@ -79,6 +84,9 @@ export const KpiCard: React.FC<KpiCardProps> = ({
             </span>
           )}
         </div>
+      )}
+      {subtitle && (
+        <div className="mt-1 text-[10px] font-mono text-slate-500 truncate">{subtitle}</div>
       )}
     </div>
   );

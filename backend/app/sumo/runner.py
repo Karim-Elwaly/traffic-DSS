@@ -327,13 +327,7 @@ def get_sumo_environment_info() -> Dict[str, Any]:
         "sumo_available": bool(bin_path and HAS_TRACI_PACKAGE),
         "sumo_home_set": bool(sumo_home),
         "sumo_home_path": sumo_home or "",
-        "networks_ready": [
-            "open_intersection.net.xml",
-            "signal_intersection.net.xml",
-            "uturn_corridor.net.xml",
-            "roundabout.net.xml",
-            "highway_4lane.net.xml",
-        ],
+        "networks_ready": sorted(p.name for p in NETWORKS_DIR.glob("*.net.xml")),
     }
 
 

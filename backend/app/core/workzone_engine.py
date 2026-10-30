@@ -348,12 +348,8 @@ def optimize_workzone_schedule(
     best_win = weekly_optimal_windows[0] if weekly_optimal_windows else optimal_windows[0]
     sop_day = best_win.day_of_week if best_win.day_of_week is not None else request.day_of_week
 
-    hv_for_sop = avg_heavy_ratio
-    if weekly_heavy_ratios:
-        hv_for_sop = sum(weekly_heavy_ratios[sop_day]) / 24.0
-
     has_heavy_lane = (1 in request.closed_lanes or 2 in request.closed_lanes)
-    divert_heavy = bool(has_heavy_lane and hv_for_sop > 0.12)
+    divert_heavy = bool(has_heavy_lane)
 
     window_en = _format_window_en(best_win)
     window_ar = _format_window_ar(best_win)

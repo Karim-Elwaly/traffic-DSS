@@ -105,6 +105,30 @@ def test_workzone_requested_window_endpoint(client):
     assert data["requested_window"]["rank"] == 0
 
 
+def test_sumo_workzone_uses_seeded_telemetry_demand(client):
+    telemetry = client.get(
+        "/api/corridors/corridor_26july/telemetry?day_of_week=0"
+    ).json()
+    peak = max(telemetry["hourly_data"], key=lambda item: item["total_pce"])
+
+    response = client.post(
+        "/api/dss/sumo/workzone-simulate",
+        json={
+            "corridor_id": "corridor_26july",
+            "closed_lanes": [1],
+            "day_of_week": 0,
+            "target_start_hour": peak["hour"],
+            "simulation_duration_sec": 10,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["target_hour"] == peak["hour"]
+    assert data["demand_pce"] == pytest.approx(peak["total_pce"], rel=1e-3)
+    assert data["simulated_vehicles_count"] >= 0
+    assert data["engine"].startswith("SUMO")
+
+
 def test_intersection_simulate_endpoint(client):
     payload = {
         "main_flow": 3400.0,

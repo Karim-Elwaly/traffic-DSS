@@ -251,13 +251,39 @@ def optimize_workzone(
 @router.post("/dss/sumo/workzone-simulate")
 def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(get_session)):
     corridor = session.get(Corridor, payload.corridor_id)
-    speed_limit = corridor.speed_limit_kmh if corridor else 80.0
-    return execute_traci_workzone_sim(
+    if not corridor:
+        raise HTTPException(status_code=404, detail=f"Corridor '{payload.corridor_id}' not found.")
+
+    # Resolve demand from the same seeded telemetry that drives the analytical
+    # engine. When no target hour is supplied, stress-test the day's peak hour.
+    records = session.exec(
+        select(HourlyTelemetry)
+        .where(HourlyTelemetry.corridor_id == payload.corridor_id)
+        .where(HourlyTelemetry.day_of_week == payload.day_of_week)
+    ).all()
+    hourly_pce: dict[int, float] = {h: 0.0 for h in range(24)}
+    for record in records:
+        hourly_pce[record.hour] += record.pce_flow
+
+    populated = {h: value for h, value in hourly_pce.items() if value > 0.0}
+    if payload.target_start_hour is not None:
+        target_hr = payload.target_start_hour
+    elif populated:
+        target_hr = max(populated, key=lambda hour: populated[hour])
+    else:
+        target_hr = 8
+    demand_pce = populated.get(target_hr, 4800.0)
+
+    metrics = execute_traci_workzone_sim(
         closed_lanes=payload.closed_lanes,
-        demand_pce=4800.0,
-        speed_limit_kmh=speed_limit,
+        demand_pce=demand_pce,
+        speed_limit_kmh=corridor.speed_limit_kmh,
         duration_sec=getattr(payload, "simulation_duration_sec", 60),
     )
+    metrics["demand_pce"] = round(demand_pce, 1)
+    metrics["target_hour"] = target_hr
+    metrics["day_of_week"] = payload.day_of_week
+    return metrics
 
 
 # ---------------------------------------------------------------------------

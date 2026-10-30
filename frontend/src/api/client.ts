@@ -634,7 +634,7 @@ function computeFallbackWorkZone(req: WorkZoneRequest): WorkZoneResponse {
       workzone_speed_limit_kmh: workzoneSpeed,
       tow_truck_staging_m: 150.0,
       heavy_vehicle_diversion:
-        (req.closed_lanes.includes(1) || req.closed_lanes.includes(2)) && corridor.speed_limit_kmh >= 70,
+        req.closed_lanes.includes(1) || req.closed_lanes.includes(2),
       tactical_instructions_en: [
         `Stage work zone equipment on ${windowEn} (duration: ${req.duration_hours}h).`,
         `Deploy sequential flashing arrow board and ${l_taper}m merge taper upstream of the lane closure.`,

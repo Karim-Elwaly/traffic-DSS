@@ -249,7 +249,7 @@ export const SumoStatusModal: React.FC<SumoStatusModalProps> = ({
               </span>
               <div className="flex items-center justify-between mt-1.5">
                 <span className="text-xs font-bold text-slate-200">
-                  {status?.networks_ready?.length || 4} Cairo Corridor Networks
+                  {status?.networks_ready?.length ?? 0} Cairo Corridor Networks
                 </span>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   VERIFIED
@@ -376,25 +376,25 @@ export const SumoStatusModal: React.FC<SumoStatusModalProps> = ({
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">Vehicles</span>
                     <span className="font-bold text-slate-100 font-mono">
-                      {testResult.alternatives[0]?.sumo_metrics?.simulated_vehicles_count || 370}
+                      {testResult.alternatives[0]?.sumo_metrics?.simulated_vehicles_count ?? '—'}
                     </span>
                   </div>
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">Mean Speed</span>
                     <span className="font-bold text-emerald-400 font-mono">
-                      {testResult.alternatives[2]?.sumo_metrics?.mean_speed_kmh || 58.6} km/h
+                      {testResult.alternatives[2]?.sumo_metrics?.mean_speed_kmh ?? '—'} km/h
                     </span>
                   </div>
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">CO2 Emissions</span>
                     <span className="font-bold text-cyan-400 font-mono">
-                      {testResult.alternatives[2]?.sumo_metrics?.co2_emissions_kg_h || 892.5} kg/h
+                      {testResult.alternatives[2]?.sumo_metrics?.co2_emissions_kg_h ?? '—'} kg/h
                     </span>
                   </div>
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
                     <span className="text-[10px] text-slate-400 block">Fuel Burn</span>
                     <span className="font-bold text-amber-400 font-mono">
-                      {testResult.alternatives[2]?.sumo_metrics?.fuel_consumption_liters_h || 374.8} L/h
+                      {testResult.alternatives[2]?.sumo_metrics?.fuel_consumption_liters_h ?? '—'} L/h
                     </span>
                   </div>
                 </div>
