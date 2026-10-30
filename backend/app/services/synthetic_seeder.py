@@ -101,6 +101,32 @@ def _get_hourly_demand_factor(hour: int, day_of_week: int) -> float:
     return factor
 
 
+def _allocate_largest_remainder(total: int, weights: List[float]) -> List[int]:
+    """
+    Splits ``total`` into integer counts proportional to ``weights`` using the
+    largest-remainder method. The returned counts always sum exactly to
+    ``total``, so a lane can never contain more vehicles than its intended
+    hourly volume.
+    """
+    total = max(0, int(total))
+    positive = [max(0.0, float(w)) for w in weights]
+    weight_sum = sum(positive)
+    if total == 0 or weight_sum <= 0.0:
+        return [0 for _ in positive]
+
+    raw = [total * w / weight_sum for w in positive]
+    counts = [int(math.floor(value)) for value in raw]
+    remaining = total - sum(counts)
+    order = sorted(
+        range(len(raw)),
+        key=lambda i: raw[i] - counts[i],
+        reverse=True,
+    )
+    for i in range(remaining):
+        counts[order[i % len(order)]] += 1
+    return counts
+
+
 def seed_corridors_and_telemetry(session: Session) -> None:
     """
     Checks if database already has corridors; if not, seeds all 3 corridors
@@ -155,17 +181,37 @@ def seed_corridors_and_telemetry(session: Session) -> None:
                     {"lane": 4, "share": 0.24, "mb_p": 0.04, "bus_p": 0.01, "truck_p": 0.00, "moto_p": 0.02, "speed_ratio": 1.05, "weaving": 0.12},
                 ]
 
-                for ld in lane_distributions:
-                    lane_veh = int(total_corridor_veh * ld["share"])
+                # Allocate the corridor total across lanes with largest-
+                # remainder rounding so the four lane volumes sum exactly to
+                # total_corridor_veh.
+                lane_totals = _allocate_largest_remainder(
+                    total_corridor_veh,
+                    [ld["share"] for ld in lane_distributions],
+                )
+
+                for lane_index, ld in enumerate(lane_distributions):
+                    lane_veh = lane_totals[lane_index]
 
                     # Heavy truck freight shift: higher at night (00:00 - 05:00)
                     night_freight_boost = 1.8 if 0 <= hour <= 5 and ld["lane"] <= 2 else 1.0
 
-                    n_microbus = int(lane_veh * ld["mb_p"] * (mb_ratio / 0.25))
-                    n_trucks = int(lane_veh * ld["truck_p"] * (tk_ratio / 0.10) * night_freight_boost)
-                    n_buses = int(lane_veh * ld["bus_p"])
-                    n_moto = int(lane_veh * ld["moto_p"])
-                    n_cars = max(0, lane_veh - (n_microbus + n_trucks + n_buses + n_moto))
+                    mb_weight = ld["mb_p"] * (mb_ratio / 0.25)
+                    truck_weight = ld["truck_p"] * (tk_ratio / 0.10) * night_freight_boost
+                    bus_weight = ld["bus_p"]
+                    moto_weight = ld["moto_p"]
+                    car_weight = max(
+                        0.02,
+                        1.0 - (mb_weight + truck_weight + bus_weight + moto_weight),
+                    )
+
+                    # Normalise the five class weights so their integer counts
+                    # sum exactly to lane_veh. This prevents the old overshoot
+                    # that forced n_cars to zero and produced more class records
+                    # than vehicles (especially on Ring Road lane 1 at night).
+                    n_microbus, n_buses, n_trucks, n_moto, n_cars = _allocate_largest_remainder(
+                        lane_veh,
+                        [mb_weight, bus_weight, truck_weight, moto_weight, car_weight],
+                    )
 
                     # Average speed (km/h) drops during peak periods
                     base_speed = speed_lim * ld["speed_ratio"]

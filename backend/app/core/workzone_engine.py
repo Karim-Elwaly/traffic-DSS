@@ -34,6 +34,25 @@ DAY_NAMES_AR = [
     "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت",
 ]
 
+# Queue storage constants. 6.5 m is the stopped bumper-to-bumper spacing used
+# by the microscopic canvases and by Egyptian work-zone practice.
+JAM_SPACING_M = 6.5
+DEFAULT_HEAVY_RATIO = 0.12
+MAX_HOURLY_DELAY_SEC = 600.0
+
+
+def fleet_average_pce(heavy_ratio: float) -> float:
+    """
+    Fleet-average PCE for the same Egyptian mix used by the microscopic
+    canvases: 25% microbuses, the remaining share split 40/60 between
+    buses (PCE 2.0) and trucks (PCE 2.5), with cars at PCE 1.0.
+
+    avg = (0.75 - hv) * 1.0 + 0.25 * 1.5 + hv * (0.4*2.0 + 0.6*2.5)
+        = 1.125 + 1.3 * hv
+    """
+    hv = max(0.0, min(0.4, heavy_ratio))
+    return 1.125 + 1.3 * hv
+
 
 def _simulate_hourly_step(
     demand: float,
@@ -42,25 +61,114 @@ def _simulate_hourly_step(
     queue_veh: float,
     open_lanes: int,
     upstream_exit_distance_m: float,
+    heavy_ratio: float = DEFAULT_HEAVY_RATIO,
+    posted_speed_kmh: float = 80.0,
+    workzone_speed_kmh: float = 60.0,
+    workzone_length_m: float = 400.0,
 ) -> Dict[str, Any]:
-    """Advances the queue recursion by one hour and evaluates delay/LoS."""
-    queue_veh = max(0.0, queue_veh + demand - capacity)
-    queue_length_m = (queue_veh * 6.5) / max(1, open_lanes)
-    spillback = queue_length_m >= upstream_exit_distance_m
+    """
+    Advances a deterministic fluid queue by one hour.
 
-    vc_ratio = demand / max(1.0, capacity)
-    delay_sec = 12.0 * (vc_ratio ** 3) + (queue_veh / max(1.0, capacity)) * 1800.0
-    pax_per_pce = passengers / max(1.0, demand)
-    phd = (demand * delay_sec / 3600.0) * pax_per_pce
+    The old recursion let ``queue += demand - capacity`` grow without bound for
+    every oversaturated hour, producing queues of hundreds of kilometres and
+    millions of person-hours. A real queue is bounded by the upstream storage
+    between the work zone and the previous exit. Once that storage is full the
+    excess demand is metered/diverted at the upstream exit; it cannot join the
+    queue. This function models that storage explicitly and derives delay from
+    Little's law (vehicle-hours in queue / vehicles served) rather than from an
+    arbitrary multiplier on the queue length.
+    """
+    hv = max(0.0, min(0.4, heavy_ratio))
+    avg_pce = fleet_average_pce(hv)
+    demand_veh = max(0.0, demand) / avg_pce
+    capacity_veh = max(1.0, capacity) / avg_pce
+
+    # Physical storage between the work-zone taper and the previous exit.
+    storage_veh = max(1.0, upstream_exit_distance_m * open_lanes / JAM_SPACING_M)
+    q0 = max(0.0, min(queue_veh, storage_veh))
+
+    if demand_veh <= capacity_veh:
+        drain_rate = capacity_veh - demand_veh
+        if q0 <= 0.0:
+            queue_veh_hours = 0.0
+            q_end = 0.0
+        elif drain_rate <= 1e-9:
+            # Exactly saturated: the queue neither grows nor clears.
+            queue_veh_hours = q0
+            q_end = q0
+        else:
+            drain_time_h = min(1.0, q0 / drain_rate)
+            queue_veh_hours = 0.5 * q0 * drain_time_h
+            q_end = max(0.0, q0 - drain_rate * 1.0)
+        joining_veh = demand_veh
+    else:
+        growth_rate = demand_veh - capacity_veh
+        if q0 >= storage_veh:
+            # Upstream storage is already full: only the bottleneck capacity
+            # can enter this hour, the rest is held/diverted upstream.
+            fill_time_h = 0.0
+            queue_veh_hours = storage_veh
+            q_end = storage_veh
+            joining_veh = capacity_veh
+        else:
+            fill_time_h = min(1.0, (storage_veh - q0) / growth_rate)
+            queue_veh_hours = (
+                q0 * fill_time_h
+                + 0.5 * growth_rate * fill_time_h ** 2
+                + storage_veh * (1.0 - fill_time_h)
+            )
+            q_end = min(storage_veh, q0 + growth_rate * fill_time_h)
+            joining_veh = demand_veh * fill_time_h + capacity_veh * (1.0 - fill_time_h)
+
+    # Work-zone geometric delay (speed reduction) plus one merge friction loss.
+    length_km = max(0.0, workzone_length_m) / 1000.0
+    free_flow_time = length_km / max(1.0, posted_speed_kmh) * 3600.0
+    wz_time = length_km / max(1.0, workzone_speed_kmh) * 3600.0
+    merge_delay = 3.0 if open_lanes < 4 else 0.0
+    base_delay_sec = max(0.0, wz_time - free_flow_time) + merge_delay
+
+    queue_delay_sec = (
+        queue_veh_hours / joining_veh * 3600.0 if joining_veh > 1e-6 else 0.0
+    )
+    delay_sec = min(MAX_HOURLY_DELAY_SEC, queue_delay_sec + base_delay_sec)
+
+    queue_length_m = min(
+        upstream_exit_distance_m,
+        q_end * JAM_SPACING_M / max(1, open_lanes),
+    )
+    spillback = (
+        q_end >= storage_veh * 0.95
+        or queue_length_m >= upstream_exit_distance_m * 0.95
+    )
+
+    # Speed drop relative to a free-flow trip over the same work-zone length.
+    if joining_veh > 1e-6 and free_flow_time > 0.0:
+        travel_time = free_flow_time + delay_sec
+        speed_drop_pct = 100.0 * (1.0 - free_flow_time / max(1.0, travel_time))
+    else:
+        speed_drop_pct = 0.0
+    speed_drop_pct = max(0.0, min(90.0, speed_drop_pct))
+
+    pax_per_veh = passengers / demand_veh if demand_veh > 1e-6 else 0.0
+    person_hours = (
+        queue_veh_hours + base_delay_sec * joining_veh / 3600.0
+    ) * pax_per_veh
+
+    vc_ratio = demand_veh / capacity_veh
 
     return {
-        "queue_veh": queue_veh,
+        "queue_veh": q_end,
         "queue_length_m": queue_length_m,
         "spillback": spillback,
         "vc_ratio": vc_ratio,
         "delay_sec": delay_sec,
-        "phd": phd,
+        "phd": person_hours,
         "los": calculate_los(delay_sec, vc_ratio),
+        "demand_veh": demand_veh,
+        "capacity_veh": capacity_veh,
+        "avg_pce": avg_pce,
+        "speed_drop_pct": speed_drop_pct,
+        "heavy_ratio": hv,
     }
 
 
@@ -73,6 +181,10 @@ def evaluate_maintenance_window(
     open_lanes: int,
     upstream_exit_distance_m: float,
     day_of_week: int = 0,
+    hourly_heavy_ratios: Optional[Sequence[float]] = None,
+    posted_speed_kmh: float = 80.0,
+    workzone_speed_kmh: float = 60.0,
+    workzone_length_m: float = 400.0,
 ) -> Dict[str, Any]:
     """
     Simulates queue accumulation and person-hours of delay across a contiguous
@@ -82,9 +194,19 @@ def evaluate_maintenance_window(
     total_phd = 0.0
     max_queue_len = 0.0
     has_spillback = False
+    weighted_speed_drop = 0.0
+    speed_weight = 0.0
+    demand_sum = 0.0
+    capacity_sum = 0.0
+    heavy_sum = 0.0
 
     for step in range(duration_hours):
         h = (start_hour + step) % 24
+        hv = (
+            hourly_heavy_ratios[h]
+            if hourly_heavy_ratios is not None and h < len(hourly_heavy_ratios)
+            else DEFAULT_HEAVY_RATIO
+        )
         state = _simulate_hourly_step(
             demand=hourly_demands[h],
             passengers=hourly_passengers[h],
@@ -92,11 +214,21 @@ def evaluate_maintenance_window(
             queue_veh=queue_veh,
             open_lanes=open_lanes,
             upstream_exit_distance_m=upstream_exit_distance_m,
+            heavy_ratio=hv,
+            posted_speed_kmh=posted_speed_kmh,
+            workzone_speed_kmh=workzone_speed_kmh,
+            workzone_length_m=workzone_length_m,
         )
         queue_veh = state["queue_veh"]
         total_phd += state["phd"]
         max_queue_len = max(max_queue_len, state["queue_length_m"])
         has_spillback = has_spillback or state["spillback"]
+        demand_sum += hourly_demands[h]
+        capacity_sum += workzone_capacity
+        heavy_sum += hv
+        weight = max(1.0, state["demand_veh"])
+        weighted_speed_drop += state["speed_drop_pct"] * weight
+        speed_weight += weight
 
     absolute_end = start_hour + duration_hours
     return {
@@ -107,6 +239,12 @@ def evaluate_maintenance_window(
         "total_phd": round(total_phd, 2),
         "max_queue_m": round(max_queue_len, 1),
         "has_spillback": has_spillback,
+        "avg_speed_drop_pct": round(
+            weighted_speed_drop / max(1.0, speed_weight), 1
+        ),
+        "avg_demand_pce": demand_sum / max(1, duration_hours),
+        "avg_capacity_pce": capacity_sum / max(1, duration_hours),
+        "avg_heavy_pct": heavy_sum / max(1, duration_hours) * 100.0,
     }
 
 
@@ -119,6 +257,10 @@ def evaluate_weekly_maintenance_window(
     capacity_by_day: Sequence[float],
     open_lanes: int,
     upstream_exit_distance_m: float,
+    weekly_heavy_ratios: Optional[Sequence[Sequence[float]]] = None,
+    posted_speed_kmh: float = 80.0,
+    workzone_speed_kmh: float = 60.0,
+    workzone_length_m: float = 400.0,
 ) -> Dict[str, Any]:
     """
     Evaluates a contiguous D-hour window anywhere in the 7-day x 24-hour week.
@@ -128,23 +270,46 @@ def evaluate_weekly_maintenance_window(
     total_phd = 0.0
     max_queue_len = 0.0
     has_spillback = False
+    weighted_speed_drop = 0.0
+    speed_weight = 0.0
+    demand_sum = 0.0
+    capacity_sum = 0.0
+    heavy_sum = 0.0
 
     for step in range(duration_hours):
         absolute = start_hour + step
         day = (start_day + absolute // 24) % 7
         hour = absolute % 24
+        hv = (
+            weekly_heavy_ratios[day][hour]
+            if weekly_heavy_ratios is not None
+            and day < len(weekly_heavy_ratios)
+            and hour < len(weekly_heavy_ratios[day])
+            else DEFAULT_HEAVY_RATIO
+        )
+        capacity = capacity_by_day[day]
         state = _simulate_hourly_step(
             demand=weekly_demands[day][hour],
             passengers=weekly_passengers[day][hour],
-            capacity=capacity_by_day[day],
+            capacity=capacity,
             queue_veh=queue_veh,
             open_lanes=open_lanes,
             upstream_exit_distance_m=upstream_exit_distance_m,
+            heavy_ratio=hv,
+            posted_speed_kmh=posted_speed_kmh,
+            workzone_speed_kmh=workzone_speed_kmh,
+            workzone_length_m=workzone_length_m,
         )
         queue_veh = state["queue_veh"]
         total_phd += state["phd"]
         max_queue_len = max(max_queue_len, state["queue_length_m"])
         has_spillback = has_spillback or state["spillback"]
+        demand_sum += weekly_demands[day][hour]
+        capacity_sum += capacity
+        heavy_sum += hv
+        weight = max(1.0, state["demand_veh"])
+        weighted_speed_drop += state["speed_drop_pct"] * weight
+        speed_weight += weight
 
     absolute_end = start_hour + duration_hours
     return {
@@ -155,6 +320,12 @@ def evaluate_weekly_maintenance_window(
         "total_phd": round(total_phd, 2),
         "max_queue_m": round(max_queue_len, 1),
         "has_spillback": has_spillback,
+        "avg_speed_drop_pct": round(
+            weighted_speed_drop / max(1.0, speed_weight), 1
+        ),
+        "avg_demand_pce": demand_sum / max(1, duration_hours),
+        "avg_capacity_pce": capacity_sum / max(1, duration_hours),
+        "avg_heavy_pct": heavy_sum / max(1, duration_hours) * 100.0,
     }
 
 
@@ -165,7 +336,6 @@ def _to_window_option(
     upstream_exit_distance_m: float,
 ) -> WindowOption:
     """Converts a raw window simulation into the API contract."""
-    spillback_ratio = raw["max_queue_m"] / max(1.0, upstream_exit_distance_m)
     return WindowOption(
         start_hour=raw["start_hour"],
         end_hour=raw["end_hour"],
@@ -174,7 +344,10 @@ def _to_window_option(
         total_person_hours_delay=raw["total_phd"],
         max_queue_length_m=raw["max_queue_m"],
         has_spillback=raw["has_spillback"],
-        avg_speed_drop_pct=round(min(90.0, spillback_ratio * 55.0), 1),
+        avg_speed_drop_pct=round(raw.get("avg_speed_drop_pct", 0.0), 1),
+        avg_demand_pce=round(raw.get("avg_demand_pce", 0.0), 1),
+        avg_capacity_pce=round(raw.get("avg_capacity_pce", 0.0), 1),
+        heavy_vehicle_percentage=round(raw.get("avg_heavy_pct", 12.0), 1),
         rank=rank,
         is_recommended=is_recommended,
     )
@@ -216,7 +389,9 @@ def optimize_workzone_schedule(
     open_lanes = max(1, 4 - n_closed)
     avg_heavy_ratio = sum(hourly_heavy_ratios) / max(1, len(hourly_heavy_ratios))
 
-    # Calculate effective capacity for the selected analysis day
+    # Calculate effective capacity for the selected analysis day. Heavy
+    # vehicles are already present in the PCE demand, so f_hv is not applied
+    # a second time.
     c_wz, f_merge, f_lane, f_hv = compute_workzone_capacity(
         base_capacity_per_lane=base_capacity_per_lane,
         total_lanes=4,
@@ -224,7 +399,19 @@ def optimize_workzone_schedule(
         heavy_vehicle_proportion=avg_heavy_ratio,
     )
     base_corridor_capacity = base_capacity_per_lane * 4
-    capacity_drop_pct = round(((base_corridor_capacity - c_wz) / base_corridor_capacity) * 100.0, 1)
+    capacity_drop_pct = round(
+        ((base_corridor_capacity - c_wz) / max(1.0, base_corridor_capacity)) * 100.0,
+        1,
+    )
+
+    # Work-zone geometry and speed regime. The zone includes the merge taper,
+    # the longitudinal buffer and a 150 m work area.
+    l_taper, l_buffer = compute_taper_and_buffer(
+        speed_limit_kmh=corridor_speed_limit,
+        closed_lanes_count=n_closed,
+    )
+    workzone_speed_limit = max(40.0, corridor_speed_limit - 20.0)
+    workzone_length_m = max(300.0, l_taper + l_buffer + 150.0)
 
     # 1. Evaluate the 24-hour hourly curve assuming the work zone is active
     hourly_curves: List[HourlyWorkZoneDetail] = []
@@ -238,6 +425,10 @@ def optimize_workzone_schedule(
             queue_veh=current_queue,
             open_lanes=open_lanes,
             upstream_exit_distance_m=upstream_exit_distance_m,
+            heavy_ratio=hourly_heavy_ratios[h],
+            posted_speed_kmh=corridor_speed_limit,
+            workzone_speed_kmh=workzone_speed_limit,
+            workzone_length_m=workzone_length_m,
         )
         current_queue = state["queue_veh"]
         hourly_curves.append(
@@ -266,6 +457,10 @@ def optimize_workzone_schedule(
             open_lanes=open_lanes,
             upstream_exit_distance_m=upstream_exit_distance_m,
             day_of_week=request.day_of_week,
+            hourly_heavy_ratios=hourly_heavy_ratios,
+            posted_speed_kmh=corridor_speed_limit,
+            workzone_speed_kmh=workzone_speed_limit,
+            workzone_length_m=workzone_length_m,
         )
         score = raw["total_phd"] + (5000.0 if raw["has_spillback"] else 0.0)
         daily_evaluations.append((score, raw))
@@ -307,6 +502,10 @@ def optimize_workzone_schedule(
                     capacity_by_day=capacity_by_day,
                     open_lanes=open_lanes,
                     upstream_exit_distance_m=upstream_exit_distance_m,
+                    weekly_heavy_ratios=weekly_heavy_ratios,
+                    posted_speed_kmh=corridor_speed_limit,
+                    workzone_speed_kmh=workzone_speed_limit,
+                    workzone_length_m=workzone_length_m,
                 )
                 score = raw["total_phd"] + (5000.0 if raw["has_spillback"] else 0.0)
                 weekly_evaluations.append((score, raw))
@@ -333,6 +532,10 @@ def optimize_workzone_schedule(
             open_lanes=open_lanes,
             upstream_exit_distance_m=upstream_exit_distance_m,
             day_of_week=request.day_of_week,
+            hourly_heavy_ratios=hourly_heavy_ratios,
+            posted_speed_kmh=corridor_speed_limit,
+            workzone_speed_kmh=workzone_speed_limit,
+            workzone_length_m=workzone_length_m,
         )
         requested_window = _to_window_option(
             raw_requested, rank=0, is_recommended=False,
@@ -340,11 +543,6 @@ def optimize_workzone_schedule(
         )
 
     # 5. Geometry & field SOP - the weekly winner is the authoritative schedule
-    l_taper, l_buffer = compute_taper_and_buffer(
-        speed_limit_kmh=corridor_speed_limit,
-        closed_lanes_count=n_closed,
-    )
-    workzone_speed_limit = max(40.0, corridor_speed_limit - 20.0)
     best_win = weekly_optimal_windows[0] if weekly_optimal_windows else optimal_windows[0]
     sop_day = best_win.day_of_week if best_win.day_of_week is not None else request.day_of_week
 
@@ -396,6 +594,7 @@ def optimize_workzone_schedule(
         base_corridor_capacity=base_corridor_capacity,
         workzone_capacity=round(c_wz, 1),
         capacity_drop_pct=capacity_drop_pct,
+        heavy_vehicle_percentage=round(avg_heavy_ratio * 100.0, 1),
         hourly_curves=hourly_curves,
         optimal_windows=optimal_windows,
         worst_window=worst_window,

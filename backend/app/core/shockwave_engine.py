@@ -12,6 +12,7 @@ _ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
 if str(_ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(_ROOT_DIR))
 
+import math
 from typing import List, Dict, Any, Optional
 from backend.app.models.schemas import (
     ShockwaveRequest,
@@ -21,23 +22,40 @@ from backend.app.models.schemas import (
 )
 
 
+JAM_SPACING_M = 6.5
+JAM_DENSITY_PER_LANE_VEH_KM = 1000.0 / JAM_SPACING_M  # 153.8 veh/km/lane
+MAX_SHOCKWAVE_KMH = 25.0
+MAX_TIME_TO_BLOCK_MIN = 240.0
+NO_BLOCKAGE_SENTINEL = 999.0
+
+
 def predict_incident_shockwave(
     request: ShockwaveRequest,
     arrival_flow_pce: float,
     arrival_speed_kmh: float,
     upstream_exit_distance_m: float = 600.0,
     base_capacity_per_lane: float = 2000.0,
+    avg_pce: float = 1.2,
 ) -> ShockwaveResponse:
     """
-    Simulates LWR shockwave propagation and micro-friction impacts during an incident.
+    Simulates LWR shockwave propagation and micro-friction impacts during an
+    incident.
+
+    All flows are PCE/h and all densities are PCE/km so the LWR wave speed
+    ``w = dq / dk`` has consistent units. The physical jam density is converted
+    to PCE/km with the same fleet-average PCE used to build the demand. The wave
+    speed is bounded to a physically observed 25 km/h, and the queue cannot grow
+    beyond the upstream storage between the incident and the previous exit.
     """
     total_lanes = 4
     open_lanes = max(1, total_lanes - request.blocked_lanes)
+    avg_pce = max(1.0, min(3.0, avg_pce))
 
     # 1. State 1: Upstream arrival conditions
-    q1 = arrival_flow_pce
-    v1 = max(15.0, arrival_speed_kmh)
-    k1 = q1 / v1  # density in veh/km across 4 lanes
+    q1 = max(0.0, arrival_flow_pce)
+    v1 = max(15.0, min(arrival_speed_kmh, 120.0))
+    k1_veh = q1 / max(1.0, v1) / avg_pce  # physical veh/km across all lanes
+    k1_pce = k1_veh * avg_pce  # PCE/km, consistent with q1
 
     # 2. State 2: Bottleneck discharge conditions
     # Microbus stops or erratic weaving degrade capacity by up to 32%
@@ -51,44 +69,56 @@ def predict_incident_shockwave(
     }
     incident_factor = incident_penalties.get(request.incident_type.upper(), 0.90)
 
-    # Bottleneck capacity
+    # Bottleneck capacity in PCE/h
     q2 = base_capacity_per_lane * open_lanes * micro_friction_factor * incident_factor
 
-    # Jam density across 4 lanes (145 veh/km/lane)
-    k_jam = 145.0 * total_lanes  # 580.0 veh/km
+    # Jam density: 6.5 m stopped spacing, converted to PCE/km. A queue cannot
+    # physically store more vehicles than this.
+    k_jam_veh = JAM_DENSITY_PER_LANE_VEH_KM * total_lanes
+    k_jam_pce = k_jam_veh * avg_pce
 
     # 3. LWR Backward Shockwave Speed
-    # Upstream density cannot physically exceed jam density.
-    effective_k1 = min(k1, k_jam * 0.95)
-    if q1 > q2:
-        w_speed_kmh = abs((q2 - q1) / max(10.0, (k_jam - effective_k1)))
+    excess_flow = max(0.0, q1 - q2)
+    density_headroom = max(1e-6, k_jam_pce - min(k1_pce, k_jam_pce * 0.95))
+    if excess_flow > 1e-6:
+        w_speed_kmh = min(MAX_SHOCKWAVE_KMH, excess_flow / density_headroom)
     else:
         w_speed_kmh = 0.0
 
     # 4. Countdown to Upstream Exit Blockage
-    upstream_exit_km = upstream_exit_distance_m / 1000.0
-    if w_speed_kmh > 0.0:
-        time_to_block_min = (upstream_exit_km / w_speed_kmh) * 60.0
+    upstream_exit_m = max(50.0, upstream_exit_distance_m)
+    if w_speed_kmh > 0.05:
+        raw_time_to_block = (upstream_exit_m / 1000.0) / w_speed_kmh * 60.0
+        time_to_block_min = min(MAX_TIME_TO_BLOCK_MIN, raw_time_to_block)
     else:
-        time_to_block_min = 999.0
+        time_to_block_min = NO_BLOCKAGE_SENTINEL
 
     is_spillback_imminent = time_to_block_min <= 20.0
+
+    # Maximum number of physical vehicles the upstream storage can hold.
+    storage_veh = upstream_exit_m / JAM_SPACING_M * total_lanes
 
     # 5. 60-Minute Queue Progression (every 5 minutes)
     queue_progression: List[QueueProgressionStep] = []
     for t_min in range(0, 65, 5):
         if w_speed_kmh > 0.0:
-            # Physical queue length in meters
-            q_len_m = (w_speed_kmh * (t_min / 60.0)) * 1000.0
-            veh_queued = int(max(0.0, (q1 - q2) * (t_min / 60.0)))
-            # Speed degrades as queue builds up
-            curr_speed = max(10.0, v1 - (q_len_m / upstream_exit_distance_m) * (v1 - 12.0))
+            elapsed_h = t_min / 60.0
+            # Shockwave travel distance, capped by the upstream storage.
+            q_len_m = min(upstream_exit_m, w_speed_kmh * elapsed_h * 1000.0)
+            excess_veh = excess_flow / avg_pce * elapsed_h
+            geometry_veh = q_len_m / JAM_SPACING_M * total_lanes
+            veh_queued = int(max(0.0, min(storage_veh, excess_veh, geometry_veh)))
+            # Speed degrades as the queue approaches the upstream exit.
+            curr_speed = max(
+                10.0,
+                v1 - (q_len_m / upstream_exit_m) * (v1 - 10.0),
+            )
         else:
             q_len_m = 0.0
             veh_queued = 0
             curr_speed = v1
 
-        spillback_reached = q_len_m >= upstream_exit_distance_m
+        spillback_reached = q_len_m >= upstream_exit_m - 0.5
 
         queue_progression.append(
             QueueProgressionStep(
@@ -112,21 +142,42 @@ def predict_incident_shockwave(
         f"يستعيد هذا الإجراء حوالي +{round(request.weaving_index * 26.0, 1)}% من سعة المحور المهدرة."
     )
 
+    if time_to_block_min >= NO_BLOCKAGE_SENTINEL:
+        block_phrase_en = "No upstream exit blockage is expected while demand remains at or below the bottleneck capacity."
+        block_phrase_ar = "لا يُتوقع ارتداد الطابور إلى المخرج السابق ما دام الطلب عند سعة عنق الزجاجة أو أقل."
+    else:
+        block_phrase_en = (
+            f"Upstream exit blockage estimated in {time_to_block_min:.1f} minutes at a "
+            f"{w_speed_kmh:.1f} km/h backward shockwave."
+        )
+        block_phrase_ar = (
+            f"من المتوقع وصول الطابور إلى المخرج السابق خلال {time_to_block_min:.1f} دقيقة "
+            f"بسرعة ارتداد {w_speed_kmh:.1f} كم/س."
+        )
+
     actions_en = [
-        f"URGENT: Upstream exit blockage estimated in {time_to_block_min:.1f} minutes at shockwave speed {w_speed_kmh:.1f} km/h.",
-        f"Dispatch Traffic Police rapid-intervention patrol to upstream exit ({upstream_exit_distance_m:.0f}m) to hold or divert incoming flows.",
+        f"URGENT: {block_phrase_en}",
+        f"Dispatch Traffic Police rapid-intervention patrol to upstream exit ({upstream_exit_m:.0f}m) to hold or divert incoming flows.",
         f"Switch Dynamic Message Signs (DMS) to 'INCIDENT AHEAD - MERGE INTO LANES 3 & 4 - MAX SPEED 40 KM/H'.",
         f"Deploy heavy rotator tow truck for immediate clearance of blocked lane(s).",
     ]
     actions_ar = [
-        f"تنبيه طارئ: متوقع إغلاق المخرج السابق خلال {time_to_block_min:.1f} دقيقة بسرعة ارتداد للموجة {w_speed_kmh:.1f} كم/س.",
-        f"توجيه دورية مرور سريعة إلى المخرج السابق (على بعد {upstream_exit_distance_m:.0f}م) لإدارة وتوزيع الكثافات.",
+        f"تنبيه طارئ: {block_phrase_ar}",
+        f"توجيه دورية مرور سريعة إلى المخرج السابق (على بعد {upstream_exit_m:.0f}م) لإدارة وتوزيع الكثافات.",
         f"تفعيل اللوحات الإرشادية المتغيرة (DMS): 'حادث أمامك - الالتزام بالحارات 3 و 4 - أقصى سرعة 40 كم/س'.",
         f"استدعاء ونش الإنقاذ السريع لرفع المركبة المتعطلة وفتح الحارات فوراً.",
     ]
 
+    severity = (
+        "HIGH - RED ALERT"
+        if is_spillback_imminent
+        else "MODERATE - AMBER"
+        if w_speed_kmh > 0.0
+        else "LOW - GREEN"
+    )
+
     sop = ShockwaveSOP(
-        incident_severity="HIGH - RED ALERT" if is_spillback_imminent else "MODERATE - AMBER",
+        incident_severity=severity,
         time_to_block_min=round(time_to_block_min, 1),
         backward_shockwave_speed_kmh=round(w_speed_kmh, 1),
         bottleneck_discharge_pce=round(q2, 1),
@@ -140,11 +191,11 @@ def predict_incident_shockwave(
         corridor_id=request.corridor_id,
         arrival_flow_pce=round(q1, 1),
         arrival_speed_kmh=round(v1, 1),
-        arrival_density_veh_km=round(k1, 1),
+        arrival_density_veh_km=round(k1_veh, 1),
         bottleneck_capacity_pce=round(q2, 1),
-        jam_density_veh_km=round(k_jam, 1),
+        jam_density_veh_km=round(k_jam_veh, 1),
         backward_shockwave_speed_kmh=round(w_speed_kmh, 1),
-        upstream_exit_distance_m=upstream_exit_distance_m,
+        upstream_exit_distance_m=round(upstream_exit_m, 1),
         time_to_block_minutes=round(time_to_block_min, 1),
         is_spillback_imminent=is_spillback_imminent,
         queue_progression=queue_progression,

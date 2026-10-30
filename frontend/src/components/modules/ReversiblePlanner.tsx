@@ -39,6 +39,7 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
       setData(res);
     } catch (err) {
       console.error(err);
+      setData(null);
     }
   };
 
@@ -126,7 +127,9 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
             className="w-full accent-emerald-400 cursor-pointer h-2 bg-slate-950 rounded-lg appearance-none mt-2"
           />
           <span className="text-[10px] text-slate-500 block mt-1">
-            {isAr ? 'تباعد ثابت 450 متر بين الإشارات' : 'Fixed 450m spacing between signals'}
+            {isAr
+              ? `تباعد متوسط ${(corridorLength / Math.max(1, intersectionsCount)).toFixed(2)} كم بين الإشارات`
+              : `Average spacing ${(corridorLength / Math.max(1, intersectionsCount)).toFixed(2)} km between signals`}
           </span>
         </div>
 
@@ -269,8 +272,8 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
               <h3 className="text-sm font-bold text-slate-100">{t.rev_green_wave_title}</h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {isAr
-                  ? `${data.green_wave_schedule.length} تقاطعات متتالية متزامنة بسرعة تصميمية 60 كم/س وتباعد 450 متر`
-                  : `${data.green_wave_schedule.length} consecutive intersections synchronized at 60 km/h design speed with 450m spacing`}
+                  ? `${data.green_wave_schedule.length} تقاطعات متتالية متزامنة بسرعة تصميمية 60 كم/س وتباعد متوسط ${(corridorLength / Math.max(1, data.green_wave_schedule.length)).toFixed(2)} كم`
+                  : `${data.green_wave_schedule.length} consecutive intersections synchronized at 60 km/h design speed, average spacing ${(corridorLength / Math.max(1, data.green_wave_schedule.length)).toFixed(2)} km`}
               </p>
             </div>
             <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">

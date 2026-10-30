@@ -201,15 +201,17 @@ def optimize_workzone(
         day_hv: List[float] = []
         for hour in range(24):
             bucket = aggregates[(day, hour)]
-            if bucket["vehicles"] > 0:
-                day_pce.append(bucket["pce"])
-                day_pax.append(bucket["pax"])
-                day_hv.append(bucket["heavy"] / max(1.0, bucket["vehicles"]))
-            else:
-                # Defensive fallback if a telemetry slice is missing.
-                day_pce.append(4500.0)
-                day_pax.append(12000.0)
-                day_hv.append(0.12)
+            if bucket["vehicles"] <= 0:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Missing telemetry for corridor '{payload.corridor_id}' "
+                        f"on day {day} at hour {hour}."
+                    ),
+                )
+            day_pce.append(bucket["pce"])
+            day_pax.append(bucket["pax"])
+            day_hv.append(bucket["heavy"] / max(1.0, bucket["vehicles"]))
         weekly_demands.append(day_pce)
         weekly_passengers.append(day_pax)
         weekly_heavy_ratios.append(day_hv)
@@ -282,17 +284,31 @@ def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(
         hourly_heavy[record.hour] += record.count_buses + record.count_trucks
 
     populated = {h: value for h, value in hourly_pce.items() if value > 0.0}
+    if not populated:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No telemetry for corridor '{payload.corridor_id}' on day "
+                f"{payload.day_of_week}."
+            ),
+        )
     if payload.target_start_hour is not None:
         target_hr = payload.target_start_hour
-    elif populated:
-        target_hr = max(populated, key=lambda hour: populated[hour])
     else:
-        target_hr = 8
-    demand_pce = populated.get(target_hr, 4800.0)
+        target_hr = max(populated, key=lambda hour: populated[hour])
+    if target_hr not in populated:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No telemetry for corridor '{payload.corridor_id}' on day "
+                f"{payload.day_of_week} at hour {target_hr}."
+            ),
+        )
+    demand_pce = populated[target_hr]
     heavy_pct = (
         100.0 * hourly_heavy[target_hr] / hourly_vehicles[target_hr]
         if hourly_vehicles[target_hr] > 0
-        else 12.0
+        else 0.0
     )
 
     metrics = execute_traci_workzone_sim(
@@ -367,12 +383,26 @@ def predict_shockwave(
     )
     records = session.exec(statement).all()
 
-    if records:
-        arrival_flow = sum(r.pce_flow for r in records)
-        arrival_speed = sum(r.avg_speed_kmh for r in records) / max(1, len(records))
-    else:
-        arrival_flow = 5800.0
-        arrival_speed = corridor.speed_limit_kmh * 0.75
+    if not records:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No telemetry for corridor '{payload.corridor_id}' on day "
+                f"{payload.day_of_week} at hour {payload.hour}."
+            ),
+        )
+
+    arrival_flow = sum(r.pce_flow for r in records)
+    arrival_speed = sum(r.avg_speed_kmh for r in records) / max(1, len(records))
+    vehicle_count = sum(
+        r.count_cars
+        + r.count_microbus
+        + r.count_buses
+        + r.count_trucks
+        + r.count_motorcycles
+        for r in records
+    )
+    avg_pce = arrival_flow / max(1.0, float(vehicle_count))
 
     response = predict_incident_shockwave(
         request=payload,
@@ -380,6 +410,7 @@ def predict_shockwave(
         arrival_speed_kmh=arrival_speed,
         upstream_exit_distance_m=corridor.upstream_exit_distance_m,
         base_capacity_per_lane=corridor.base_capacity_per_lane,
+        avg_pce=avg_pce,
     )
 
     if payload.engine_mode == "sumo":

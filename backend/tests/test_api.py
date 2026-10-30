@@ -87,6 +87,16 @@ def test_workzone_optimize_endpoint(client):
     assert data["weekly_optimal_windows"][0]["day_of_week"] is not None
     assert "day_of_week" in data["weekly_worst_window"]
     assert data["requested_window"] is None
+    assert data["heavy_vehicle_percentage"] > 0.0
+    for hour in data["hourly_curves"]:
+        assert 0.0 <= hour["queue_length_m"] <= 600.0
+        assert 0.0 <= hour["delay_sec_per_veh"] <= 600.0
+        assert hour["person_hours_delay"] < 1_000_000.0
+    for window in data["optimal_windows"]:
+        assert window["avg_demand_pce"] > 0.0
+        assert window["avg_capacity_pce"] > 0.0
+        assert window["heavy_vehicle_percentage"] > 0.0
+        assert window["max_queue_length_m"] <= 600.0
 
 
 def test_workzone_requested_window_endpoint(client):
@@ -157,12 +167,19 @@ def test_shockwave_predict_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert data["backward_shockwave_speed_kmh"] >= 0
+    assert data["backward_shockwave_speed_kmh"] <= 25.0
     assert len(data["queue_progression"]) > 0
     # A single day's four lanes must be aggregated, not all seven days.
     assert data["arrival_flow_pce"] < 20000.0
     assert data["arrival_speed_kmh"] < 120.0
     assert data["upstream_exit_distance_m"] == 600.0
-    assert data["queue_progression"][-1]["queue_length_m"] < 100000.0
+    assert data["queue_progression"][-1]["queue_length_m"] <= 600.0
+    assert data["jam_density_veh_km"] <= 1000.0
+    assert data["arrival_density_veh_km"] < data["jam_density_veh_km"]
+    for step in data["queue_progression"]:
+        assert step["queue_length_m"] <= 600.0
+        assert step["vehicles_in_queue"] >= 0
+        assert 0.0 <= step["upstream_speed_kmh"] <= data["arrival_speed_kmh"]
 
 
 def test_reversible_evaluate_endpoint(client):
@@ -179,7 +196,18 @@ def test_reversible_evaluate_endpoint(client):
     data = response.json()
     assert data["recommended_mode"] == "REVERSIBLE_5_3"
     assert len(data["green_wave_schedule"]) == 4
-    assert data["green_wave_schedule"][1]["distance_from_start_m"] == 450.0
+    # 8.5 km corridor with 4 signals -> 2,125 m average spacing, not a fixed
+    # 450 m. The offsets must be derived from that physical distance.
+    assert data["green_wave_schedule"][1]["distance_from_start_m"] == pytest.approx(2125.0)
+    assert data["green_wave_schedule"][1]["offset_seconds"] == pytest.approx(
+        (2125.0 / (60.0 / 3.6)) % 90.0, abs=0.1
+    )
+    assert 0.0 <= data["pre_arrival_flush_time_sec"] <= 240.0
+    assert 0.0 <= data["travel_time_saved_pct"] <= 100.0
+    for config in (data["standard_4_4"], data["reversible_5_3"]):
+        assert 0.0 <= config["inbound_delay_sec"] <= 600.0
+        assert 0.0 <= config["outbound_safety_margin_pct"] <= 100.0
+        assert config["inbound_speed_kmh"] >= 12.0
 
 
 def test_cv_ingest_endpoint(client):

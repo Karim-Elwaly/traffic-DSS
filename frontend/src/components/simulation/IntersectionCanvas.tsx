@@ -64,6 +64,7 @@ interface SimVehicle {
   turnDestinationLane?: number;
   turnOnRed?: boolean;
   turnWait?: number;
+  laneCooldown?: number;
   willUturn?: boolean;
   pathProgress?: number;
   loopFromY?: number;
@@ -85,6 +86,8 @@ interface LiveMetrics {
   uturnDelay: number;
   uturnSpeed: number;
   uturnLos: Los;
+  /** True until at least one full signal cycle has elapsed. */
+  warmup: boolean;
 }
 
 const W = 640;
@@ -130,6 +133,7 @@ const initialLive: LiveMetrics = {
   uturnDelay: 0,
   uturnSpeed: 0,
   uturnLos: 'A',
+  warmup: true,
 };
 
 function bezier(
@@ -496,7 +500,65 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       return { gap, leaderSpeed };
     };
 
+    const laneChangeGap = (v: SimVehicle, targetLane: number) => {
+      let ahead = Infinity;
+      let behind = Infinity;
+      for (const other of signalVehicles) {
+        if (other.id === v.id || other.stream !== v.stream || other.lane !== targetLane) continue;
+        const signed =
+          v.stream === 'east'
+            ? other.x - v.x
+            : v.stream === 'west'
+            ? v.x - other.x
+            : v.stream === 'south'
+            ? other.y - v.y
+            : v.y - other.y;
+        const clear = Math.abs(signed) - (v.lengthPx + other.lengthPx) / 2;
+        if (signed >= 0) ahead = Math.min(ahead, clear);
+        else behind = Math.min(behind, clear);
+      }
+      return { ahead, behind };
+    };
+
+    // A through vehicle stuck behind a right-turner (or a stopped queue) should
+    // use the adjacent lane. Without this, lane 1 held nearly all of the queue:
+    // right-turners waiting at the stop line blocked every through vehicle
+    // behind them, halving the mainline's usable capacity.
+    const trySignalLaneChange = (v: SimVehicle) => {
+      if (v.movement !== 'through' || v.passedStop || v.lane !== 1) return;
+      if ((v.laneCooldown ?? 0) > 0) return;
+      const dist = distToStop(v);
+      if (dist < 12 || dist > 180) return;
+      const own = leaderGap(v);
+      if (own.gap > 45 || own.leaderSpeed > 6) return;
+      const target = laneChangeGap(v, 2);
+      if (target.ahead < 18 || target.behind < 16) return;
+      v.lane = 2;
+      if (v.stream === 'east' || v.stream === 'west') {
+        v.y = SIGNAL_LANE_Y[v.stream as SignalStream][1];
+      } else {
+        v.x = SIGNAL_LANE_Y[v.stream as SignalStream][1];
+      }
+      v.laneCooldown = 6;
+    };
+
     const moveSignalVehicle = (v: SimVehicle, dt: number) => {
+      v.laneCooldown = Math.max(0, (v.laneCooldown ?? 0) - dt);
+      trySignalLaneChange(v);
+
+      // Channelised right-turn slip lane. Right-turners leave the through lane
+      // ~20 m before the stop line and wait in a curb-side auxiliary lane, so a
+      // red-light right-turner never blocks the through movement behind it.
+      if (v.movement === 'right' && !v.passedStop && v.lane === 1) {
+        if (distToStop(v) < 80) {
+          v.lane = 0;
+          if (v.stream === 'east') v.y = SIGNAL_LANE_Y.east[0] + 12;
+          else if (v.stream === 'west') v.y = SIGNAL_LANE_Y.west[0] - 12;
+          else if (v.stream === 'south') v.x = SIGNAL_LANE_Y.south[0] - 12;
+          else v.x = SIGNAL_LANE_Y.north[0] + 12;
+        }
+      }
+
       const stop = STOP_LINE[v.stream as SignalStream];
       const state = signalStateFor(v.stream as SignalStream);
       let desired = (v.stream === 'east' || v.stream === 'west' ? MAIN_SPEED_PX : CROSS_SPEED_PX) * v.spec.speedFactor;
@@ -815,6 +877,16 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             );
           }
         }
+        const slip = signalVehicles.filter(
+          (v) => v.stream === stream && v.lane === 0 && !v.passedStop
+        );
+        if (slip.length > 1) {
+          safePass(
+            slip,
+            stream === 'east' || stream === 'west' ? 'x' : 'y',
+            stream === 'east' || stream === 'south'
+          );
+        }
       });
       for (let lane = 1; lane <= 2; lane += 1) {
         safePass(uturnVehicles.filter((v) => v.stream === 'east' && v.lane === lane), 'x', true);
@@ -858,7 +930,10 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       uturnVehicles.length = 0;
       uturnVehicles.push(...keepUturn);
 
-      const cutoff = simTime - 65;
+      // A signal cycle is ~92 s, so a 60 s sample is shorter than one cycle and
+      // systematically over- or under-represents the red-phase arrivals. Keep
+      // two full cycles so the measured delay is phase-unbiased.
+      const cutoff = simTime - Math.max(65, cycleSec * 2);
       while (completedSignal.length > 0 && completedSignal[0].time < cutoff) completedSignal.shift();
       while (completedUturn.length > 0 && completedUturn[0].time < cutoff) completedUturn.shift();
     };
@@ -887,9 +962,15 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         }
       }
 
-      const windowSec = Math.max(10, Math.min(60, simTime));
+      const statsWindowSec = Math.max(65, cycleSec * 2);
+      const windowSec = Math.max(10, Math.min(statsWindowSec, simTime));
       const signalThroughput =
-        (completedSignal.filter((c) => c.time >= simTime - 60).length * 3600) / windowSec;
+        (completedSignal.filter((c) => c.time >= simTime - statsWindowSec).length * 3600) /
+        windowSec;
+
+      // Do not publish KPIs from the first cycle: the network starts empty and
+      // the initial queue is a warm-up artifact, not a steady-state condition.
+      const warmup = simTime < cycleSec || completedSignal.length < 20;
 
       const completedDelay = completedSignal.reduce((s, c) => s + c.delay, 0);
       const activeStopped = signalVehicles.reduce((s, v) => s + v.stoppedTime, 0);
@@ -936,6 +1017,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           signalVehicles.length > 0
             ? Math.round((signalSpeedSum / signalVehicles.length / PX_PER_M) * 3.6 * 10) / 10
             : 0,
+        warmup,
         signalThroughput: Math.round(signalThroughput),
         signalLos: losFromDelay(signalDelay, true),
         uturnActive,
@@ -1332,7 +1414,9 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   };
 
   const liveDelayReduction =
-    live.signalDelay > 0 ? Math.max(0, ((live.signalDelay - live.uturnDelay) / live.signalDelay) * 100) : 0;
+    !live.warmup && live.signalDelay > 0
+      ? Math.max(0, ((live.signalDelay - live.uturnDelay) / live.signalDelay) * 100)
+      : 0;
 
   const signalStateLabel =
     live.phase === 'MAIN_GREEN'
@@ -1485,7 +1569,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
                   {isAr ? '٨ نقاط تعارض حرجة' : '8 Conflict Points'}
                 </span>
                 <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(live.signalLos)}`}>
-                  LOS {live.signalLos}
+                  LOS {live.warmup ? '—' : live.signalLos}
                 </span>
               </div>
             </div>
@@ -1508,7 +1592,9 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
               <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg text-slate-300">
                 <span className="text-slate-400">{isAr ? 'طابور الانتظار: ' : 'Queue: '}</span>
                 <span className="text-rose-400 font-bold">
-                  {live.signalQueueVeh} {isAr ? 'مركبة' : 'veh'} · {live.signalQueueM} m
+                  {live.warmup
+                    ? '—'
+                    : `${live.signalQueueVeh} ${isAr ? 'مركبة' : 'veh'} · ${live.signalQueueM} m`}
                 </span>
               </div>
             </div>
@@ -1517,17 +1603,23 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-2.5 border-t border-slate-800/80 text-center">
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'متوسط التأخير' : 'Avg Delay'}</span>
-              <span className="text-xs font-bold text-rose-400 font-mono">{live.signalDelay.toFixed(1)} s/veh</span>
+              <span className="text-xs font-bold text-rose-400 font-mono">
+                {live.warmup ? '—' : `${live.signalDelay.toFixed(1)} s/veh`}
+              </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
-              <span className="text-xs font-bold text-amber-400 font-mono">{live.signalQueueM} m</span>
+              <span className="text-xs font-bold text-amber-400 font-mono">
+                {live.warmup ? '—' : `${live.signalQueueM} m`}
+              </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
                 <Activity className="w-3 h-3" /> {isAr ? 'التدفق' : 'Throughput'}
               </span>
-              <span className="text-xs font-bold text-cyan-400 font-mono">{live.signalThroughput.toLocaleString()} veh/h</span>
+              <span className="text-xs font-bold text-cyan-400 font-mono">
+                {live.warmup ? '—' : `${live.signalThroughput.toLocaleString()} veh/h`}
+              </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'نوع التصادم' : 'Collision Type'}</span>
@@ -1602,7 +1694,13 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         <div className="flex items-center gap-2.5">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="text-slate-300 leading-relaxed">
-            {isAr ? (
+            {live.warmup ? (
+              <span className="text-slate-400">
+                {isAr
+                  ? 'جاري تسخين المحاكاة لدورة إشارة كاملة قبل نشر المؤشرات…'
+                  : 'Warming up for one full signal cycle before publishing KPIs…'}
+              </span>
+            ) : isAr ? (
               <>
                 <strong className="text-emerald-400 font-semibold">قياس حي: </strong>
                 نموذج إلغاء التقاطع يقلل التأخير المقاس بنسبة{' '}

@@ -38,6 +38,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
       setData(res);
     } catch (err) {
       console.error(err);
+      setData(null);
     } finally {
       setIsLoading(false);
     }

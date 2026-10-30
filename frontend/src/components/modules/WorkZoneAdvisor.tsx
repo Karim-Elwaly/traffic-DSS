@@ -66,6 +66,7 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       setData(res);
     } catch (err) {
       console.error(err);
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -103,15 +104,17 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       : data?.worst_window;
   const recommendedWindow = hasWeekly ? weeklyWindows[0] : data?.optimal_windows[0];
 
-  const closureDemandPce = (() => {
-    if (!data || !recommendedWindow) return 5800;
-    let sum = 0;
-    for (let step = 0; step < durationHours; step++) {
-      const h = (recommendedWindow.start_hour + step) % 24;
-      sum += data.hourly_curves[h]?.demand_pce ?? 0;
-    }
-    return Math.round(sum / Math.max(1, durationHours));
-  })();
+  const canvasWindow =
+    data?.requested_window ?? activeWindows[0] ?? recommendedWindow;
+  const closureDemandPce = canvasWindow
+    ? Math.round(canvasWindow.avg_demand_pce)
+    : 0;
+  const canvasCapacityPce = canvasWindow
+    ? Math.round(canvasWindow.avg_capacity_pce)
+    : 0;
+  const canvasHeavyPct = canvasWindow
+    ? canvasWindow.heavy_vehicle_percentage
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -543,15 +546,26 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       )}
 
       {/* Live 60fps Micro-Simulator Canvas */}
-      <HighwayCanvas
-        closedLanes={closedLanes}
-        speedLimitKmh={speedLimitKmh}
-        demandPce={closureDemandPce}
-        capacityPce={Math.round(
-          data?.workzone_capacity ?? 0
-        )}
-        language={language}
-      />
+      {canvasWindow ? (
+        <HighwayCanvas
+          closedLanes={closedLanes}
+          speedLimitKmh={speedLimitKmh}
+          demandPce={closureDemandPce}
+          capacityPce={canvasCapacityPce}
+          heavyPct={canvasHeavyPct}
+          language={language}
+        />
+      ) : (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center text-sm text-slate-400">
+          {loading
+            ? isAr
+              ? 'جاري تحميل بيانات المحاكاة…'
+              : 'Loading measured simulation data…'
+            : isAr
+            ? 'لا تتوفر بيانات قياس للمحاكاة.'
+            : 'No measured telemetry is available for the simulation.'}
+        </div>
+      )}
 
       {/* Field SOP Action Card */}
       {data && (

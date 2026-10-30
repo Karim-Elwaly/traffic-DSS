@@ -60,7 +60,12 @@ class CorridorTelemetryResponse(BaseModel):
 
 class WorkZoneRequest(BaseModel):
     corridor_id: str = "corridor_26july"
-    closed_lanes: List[int] = Field(default=[1], description="List of closed lane indices (1 to 4)")
+    closed_lanes: List[int] = Field(
+        default=[1],
+        min_length=1,
+        max_length=3,
+        description="List of closed lane indices (1 to 4); at least one lane must stay open",
+    )
     duration_hours: int = Field(default=4, ge=1, le=12)
     day_of_week: int = Field(default=0, ge=0, le=6)
     target_start_hour: Optional[int] = Field(default=None, ge=0, le=23)
@@ -89,6 +94,9 @@ class WindowOption(BaseModel):
     max_queue_length_m: float
     has_spillback: bool
     avg_speed_drop_pct: float
+    avg_demand_pce: float = 0.0
+    avg_capacity_pce: float = 0.0
+    heavy_vehicle_percentage: float = 12.0
     rank: int
     is_recommended: bool
 
@@ -115,6 +123,7 @@ class WorkZoneResponse(BaseModel):
     base_corridor_capacity: float
     workzone_capacity: float
     capacity_drop_pct: float
+    heavy_vehicle_percentage: float = 12.0
     hourly_curves: List[HourlyWorkZoneDetail]
     optimal_windows: List[WindowOption]
     worst_window: WindowOption

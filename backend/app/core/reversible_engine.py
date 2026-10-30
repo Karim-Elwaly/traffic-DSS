@@ -24,9 +24,16 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     """
     Simulates dynamic lane reallocation (5+3) against baseline (4+4)
     and computes Green Wave synchronization offsets.
+
+    Delay follows a BPR-style oversaturation term and is capped at 600 s so a
+    slider extreme cannot produce an unbounded ``inbound_delay``. Queue and
+    flush estimates are capped by the physical corridor storage.
     """
     total_flow = request.inbound_flow + request.outbound_flow
     split_pct = (request.inbound_flow / max(1.0, total_flow)) * 100.0
+
+    def bounded_delay(vc_ratio: float) -> float:
+        return max(0.0, min(600.0, (vc_ratio - 0.75) * 220.0))
 
     # -----------------------------------------------------------------------
     # Baseline Configuration: Standard 4 Inbound / 4 Outbound
@@ -42,8 +49,8 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         75.0 * (1.0 - 0.75 * max(0.0, std_in_vc - 0.65)),
     )
     std_in_time_min = (request.corridor_length_km / std_in_speed) * 60.0
-    std_in_delay = max(0.0, (std_in_vc - 0.75) * 220.0)
-    std_out_safety = max(0.0, (1.0 - std_out_vc) * 100.0)
+    std_in_delay = bounded_delay(std_in_vc)
+    std_out_safety = max(0.0, min(100.0, (1.0 - std_out_vc) * 100.0))
 
     config_std = ReversibleConfigMetric(
         configuration_name="Standard 4+4 Static Lanes",
@@ -57,7 +64,7 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         inbound_travel_time_min=round(std_in_time_min, 1),
         inbound_delay_sec=round(std_in_delay, 1),
         outbound_safety_margin_pct=round(std_out_safety, 1),
-        is_viable=True,
+        is_viable=std_in_vc <= 1.0 and std_out_vc <= 1.0,
     )
 
     # -----------------------------------------------------------------------
@@ -73,9 +80,11 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         75.0 * (1.0 - 0.75 * max(0.0, rev_in_vc - 0.65)),
     )
     rev_in_time_min = (request.corridor_length_km / rev_in_speed) * 60.0
-    rev_in_delay = max(0.0, (rev_in_vc - 0.75) * 220.0)
-    rev_out_safety = max(0.0, (1.0 - rev_out_vc) * 100.0)
-    rev_is_viable = rev_out_vc < 0.85
+    rev_in_delay = bounded_delay(rev_in_vc)
+    rev_out_safety = max(0.0, min(100.0, (1.0 - rev_out_vc) * 100.0))
+    # Reversible operation is only viable when neither direction is
+    # oversaturated and the reduced outbound direction keeps a safety margin.
+    rev_is_viable = rev_out_vc < 0.85 and rev_in_vc <= 1.0
 
     config_rev = ReversibleConfigMetric(
         configuration_name="Dynamic Reversible 5+3 Lanes",
@@ -95,7 +104,14 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
     # Savings metrics
     time_saved_pct = max(
         0.0,
-        round(((std_in_time_min - rev_in_time_min) / max(0.1, std_in_time_min)) * 100.0, 1),
+        min(
+            100.0,
+            round(
+                ((std_in_time_min - rev_in_time_min) / max(0.1, std_in_time_min))
+                * 100.0,
+                1,
+            ),
+        ),
     )
     delay_saved_pct = max(
         0.0,
@@ -106,19 +122,28 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
 
     # Decision recommendation follows the specification:
     # directional split > 68% AND outbound standard 4+4 v/c < 0.45 (or emergency override).
-    if ((split_pct > 68.0 and std_out_vc < 0.45 and rev_is_viable) or request.emergency_mode):
+    if (
+        (split_pct > 68.0 and std_out_vc < 0.45 and rev_is_viable)
+        or (request.emergency_mode and rev_is_viable)
+    ):
         recommended_mode = "REVERSIBLE_5_3"
     else:
         recommended_mode = "STANDARD_4_4"
 
     # -----------------------------------------------------------------------
-    # Green Wave Coordination (5 Consecutive Intersections)
+    # Green Wave Coordination (consecutive intersections)
     # -----------------------------------------------------------------------
-    # Target progression speed = 60 km/h (16.67 m/s), nodes spaced at 450 m
+    # Target progression speed = 60 km/h (16.67 m/s). The spacing must come
+    # from the actual corridor length and the number of signals; a fixed 450 m
+    # spacing is only correct for a 1.8 km corridor and produced impossible
+    # offsets on an 8.5 km axis.
     progression_speed_ms = 60.0 / 3.6
     cycle_length = 90.0
     green_window = 52.0
-    link_spacing_m = 450.0
+    link_spacing_m = (
+        request.corridor_length_km * 1000.0
+        / max(1, request.intersections_count)
+    )
 
     intersections_meta = [
         ("Axis Entrance Interchange", "تقاطع مدخل المحور"),
@@ -153,9 +178,19 @@ def evaluate_reversible_corridor(request: ReversibleRequest) -> ReversibleRespon
         )
 
     # Emergency Pre-Arrival Queue Flush Time
-    # Assuming baseline queue of ~85 meters before progression
-    estimated_queue_m = max(25.0, (std_in_delay * 1.8))
-    pre_arrival_flush_sec = round((estimated_queue_m / 8.5) + 18.0, 1)
+    # Little's law: average vehicles in the approach = arrival rate x delay.
+    # Convert that count to a physical queue length with 7.5 m per vehicle over
+    # the four inbound lanes, capped by the corridor storage.
+    avg_queue_veh = (request.inbound_flow / 3600.0) * std_in_delay
+    estimated_queue_m = min(
+        request.corridor_length_km * 1000.0 * 0.90,
+        max(0.0, avg_queue_veh * 7.5 / 4.0),
+    )
+    pre_arrival_flush_sec = (
+        0.0
+        if estimated_queue_m < 1.0
+        else round(min(240.0, (estimated_queue_m / 8.5) + 18.0), 1)
+    )
 
     # Executive Summaries
     if recommended_mode == "REVERSIBLE_5_3":

@@ -72,13 +72,17 @@ def test_workzone_capacity_and_penalty():
         heavy_vehicle_proportion=0.15,
     )
     # n_closed = 1 -> open = 3
-    # f_merge = 1 - 0.12*1 = 0.88
-    # closing lane 1 -> f_lane = 0.88
+    # f_merge = 1 - 0.06*1 = 0.94
+    # closing lane 1 (rightmost) -> f_lane = 1.0
     # f_hv = 1 / (1 + 0.15 * 1.5) = 1 / 1.225 = 0.8163
-    # c_wz = 2000 * 3 * 0.88 * 0.88 * f_hv
-    assert f_merge == 0.88
-    assert f_lane == 0.88
-    assert c_wz > 3500.0 and c_wz < 4000.0
+    # Demand is already in PCE, so f_hv is reported but NOT applied twice:
+    # c_wz = 2000 * 3 * 0.94 = 5,640 PCE/h (29.5% drop for one lane lost)
+    assert f_merge == pytest.approx(0.94)
+    assert f_lane == pytest.approx(1.0)
+    assert f_hv == pytest.approx(1.0 / 1.225)
+    assert c_wz == pytest.approx(5640.0)
+    # A 3-lane work zone must retain far more than half the base capacity.
+    assert c_wz > 2000.0 * 3 * 0.90
 
 
 def test_workzone_optimizer_and_sop():
@@ -131,10 +135,34 @@ def test_intersection_engine():
     assert uturn_alt.conflict_points == 4
     assert round_alt.conflict_points == 8
 
-    # High main flow should favor U-Turn or Signal
-    assert resp.recommended_option_id in ["UTURN", "SIGNAL"]
+    # The winner is data-driven; every alternative must report finite,
+    # physically bounded HCM values.
+    valid_ids = {alt.id for alt in resp.alternatives}
+    assert resp.recommended_option_id in valid_ids
     assert resp.recommendation_rationale_en is not None
     assert resp.recommendation_rationale_ar is not None
+    for alt in resp.alternatives:
+        assert 0.0 <= alt.average_delay_sec <= 300.0
+        assert 0.0 <= alt.queue_95th_m <= 500.0
+        assert 0.0 <= alt.volume_to_capacity < 100.0
+        assert alt.level_of_service in {"A", "B", "C", "D", "E", "F"}
+        assert alt.conflict_points >= 0
+
+
+def test_intersection_engine_heavy_demand_prefers_grade_separated_or_signal():
+    req = IntersectionRequest(
+        main_flow=6000.0,
+        cross_flow=1500.0,
+        turning_pct=18.0,
+        heavy_pct=12.0,
+        uturn_distance_m=450.0,
+    )
+    resp = simulate_intersections(req)
+    assert resp.recommended_option_id in {"UTURN", "SIGNAL"}
+    for alt in resp.alternatives:
+        assert alt.average_delay_sec <= 300.0
+        assert alt.queue_95th_m <= 500.0
+        assert alt.volume_to_capacity < 100.0
 
 
 def test_shockwave_engine():
@@ -152,10 +180,33 @@ def test_shockwave_engine():
         upstream_exit_distance_m=600.0,
     )
 
-    assert resp.backward_shockwave_speed_kmh > 0.0
+    assert 0.0 < resp.backward_shockwave_speed_kmh <= 25.0
     assert resp.time_to_block_minutes > 0.0
     assert len(resp.queue_progression) == 13  # 0 to 60 mins in 5-min increments
     assert resp.sop.micro_friction_remedy_en is not None
+    storage_veh = 600.0 / 6.5 * 4
+    for step in resp.queue_progression:
+        assert 0.0 <= step.queue_length_m <= 600.0
+        assert 0 <= step.vehicles_in_queue <= storage_veh
+        assert 10.0 <= step.upstream_speed_kmh <= resp.arrival_speed_kmh
+
+
+def test_shockwave_no_queue_when_demand_below_bottleneck():
+    resp = predict_incident_shockwave(
+        request=ShockwaveRequest(
+            corridor_id="corridor_26july",
+            blocked_lanes=1,
+            incident_type="STALL",
+            weaving_index=0.1,
+        ),
+        arrival_flow_pce=1800.0,
+        arrival_speed_kmh=70.0,
+        upstream_exit_distance_m=600.0,
+    )
+    assert resp.backward_shockwave_speed_kmh == 0.0
+    assert resp.time_to_block_minutes == 999.0
+    assert resp.is_spillback_imminent is False
+    assert all(step.queue_length_m == 0.0 for step in resp.queue_progression)
 
 
 def test_reversible_engine():
@@ -229,10 +280,11 @@ def test_green_wave_spacing_and_node_count():
     )
     assert len(resp.green_wave_schedule) == 3
     distances = [node.distance_from_start_m for node in resp.green_wave_schedule]
-    assert distances == [0.0, 450.0, 900.0]
-    # 450m at 60 km/h (16.667 m/s) = 27.0s offset per link.
-    assert resp.green_wave_schedule[1].offset_seconds == pytest.approx(27.0)
-    assert resp.green_wave_schedule[2].offset_seconds == pytest.approx(54.0)
+    # 8.5 km / 3 signals = 2,833.3 m average spacing (rounded to whole metres).
+    assert distances == pytest.approx([0.0, 2833.0, 5667.0], abs=0.1)
+    # 2,833 m at 60 km/h = 170.0 s, wrapped into the 90 s cycle.
+    assert resp.green_wave_schedule[1].offset_seconds == pytest.approx(80.0, abs=0.1)
+    assert resp.green_wave_schedule[2].offset_seconds == pytest.approx(70.0, abs=0.1)
 
 
 def test_weekly_workzone_optimizer_and_requested_window():
@@ -249,9 +301,12 @@ def test_weekly_workzone_optimizer_and_requested_window():
     weekly_demands = [[5000.0] * 24 for _ in range(7)]
     weekly_passengers = [[12000.0] * 24 for _ in range(7)]
     weekly_heavy = [[0.12] * 24 for _ in range(7)]
-    # Friday (day 5) pre-dawn is the quietest slice of the week.
+    # Friday (day 5) pre-dawn is the quietest slice of the week. Passenger
+    # demand must fall with vehicle demand (a 10x vehicle drop cannot leave
+    # 30 passengers in every vehicle).
     for hour in range(2, 6):
         weekly_demands[5][hour] = 500.0
+        weekly_passengers[5][hour] = 1200.0
 
     resp = optimize_workzone_schedule(
         request=req,
@@ -296,6 +351,111 @@ def test_weekly_workzone_optimizer_and_requested_window():
     assert requested.requested_window.start_hour == 7
     assert requested.requested_window.day_of_week == 2
     assert requested.requested_window.rank == 0
+
+
+def test_workzone_extreme_demand_stays_physically_bounded():
+    req = WorkZoneRequest(
+        corridor_id="corridor_26july",
+        closed_lanes=[1, 2, 3],
+        duration_hours=12,
+        day_of_week=4,
+    )
+    # A deliberately absurd 20,000 PCE/h demand for 12 hours.
+    resp = optimize_workzone_schedule(
+        request=req,
+        hourly_demands=[20000.0] * 24,
+        hourly_passengers=[60000.0] * 24,
+        hourly_heavy_ratios=[0.20] * 24,
+        corridor_speed_limit=80.0,
+        upstream_exit_distance_m=600.0,
+    )
+
+    assert resp.workzone_capacity > 0.0
+    assert resp.heavy_vehicle_percentage == pytest.approx(20.0)
+    for hour in resp.hourly_curves:
+        assert hour.queue_length_m <= 600.0
+        assert hour.queue_veh >= 0.0
+        assert 0.0 <= hour.delay_sec_per_veh <= 600.0
+        assert 0.0 <= hour.person_hours_delay < 1_000_000.0
+        assert hour.level_of_service in {"A", "B", "C", "D", "E", "F"}
+    for window in resp.optimal_windows + [resp.worst_window]:
+        assert window.total_person_hours_delay < 1_000_000.0
+        assert window.max_queue_length_m <= 600.0
+        assert window.avg_demand_pce == pytest.approx(20000.0)
+        assert window.avg_capacity_pce > 0.0
+        assert window.heavy_vehicle_percentage == pytest.approx(20.0)
+
+
+def test_reversible_extreme_flows_stay_bounded():
+    resp = evaluate_reversible_corridor(
+        ReversibleRequest(
+            corridor_id="corridor_26july",
+            inbound_flow=9000.0,
+            outbound_flow=7000.0,
+            corridor_length_km=8.5,
+            emergency_mode=True,
+            intersections_count=3,
+        )
+    )
+    for config in (resp.standard_4_4, resp.reversible_5_3):
+        assert 0.0 <= config.inbound_delay_sec <= 600.0
+        assert 0.0 <= config.outbound_safety_margin_pct <= 100.0
+        assert config.inbound_speed_kmh >= 12.0
+        assert config.inbound_travel_time_min > 0.0
+    assert 0.0 <= resp.travel_time_saved_pct <= 100.0
+    assert 0.0 <= resp.delay_reduction_pct <= 100.0
+    assert 0.0 <= resp.pre_arrival_flush_time_sec <= 240.0
+    # Three outbound lanes cannot absorb 7,000 veh/h.
+    assert resp.reversible_5_3.outbound_vc_ratio > 1.0
+    assert resp.reversible_5_3.is_viable is False
+    assert resp.recommended_mode == "STANDARD_4_4"
+
+
+def test_seeder_lane_counts_sum_to_corridor_total():
+    from sqlmodel import SQLModel, Session, create_engine, select
+    from sqlmodel.pool import StaticPool
+    from backend.app.models.domain import HourlyTelemetry
+    from backend.app.services.synthetic_seeder import (
+        CORRIDOR_METADATA,
+        _get_hourly_demand_factor,
+        seed_corridors_and_telemetry,
+    )
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        seed_corridors_and_telemetry(session)
+        for meta in CORRIDOR_METADATA:
+            records = session.exec(
+                select(HourlyTelemetry).where(
+                    HourlyTelemetry.corridor_id == meta["id"]
+                )
+            ).all()
+            assert len(records) == 7 * 24 * 4
+            by_hour: dict[tuple[int, int], list[HourlyTelemetry]] = {}
+            for record in records:
+                by_hour.setdefault(
+                    (record.day_of_week, record.hour), []
+                ).append(record)
+            for (day, hour), lane_records in by_hour.items():
+                total_vehicles = sum(
+                    record.count_cars
+                    + record.count_microbus
+                    + record.count_buses
+                    + record.count_trucks
+                    + record.count_motorcycles
+                    for record in lane_records
+                )
+                expected = int(
+                    6200.0
+                    * _get_hourly_demand_factor(hour, day)
+                    * meta["peak_flow_multiplier"]
+                )
+                assert total_vehicles == expected
 
 
 def test_los_exact_thresholds():

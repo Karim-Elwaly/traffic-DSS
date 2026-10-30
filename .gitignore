@@ -33,6 +33,7 @@ htmlcov/
 *.db
 *.sqlite3
 *.db-journal
+*.db.bak-*
 
 # Node & Frontend
 node_modules/

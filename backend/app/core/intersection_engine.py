@@ -5,6 +5,11 @@ Compares 4 geometric and operational intersection alternatives:
 2. Webster's Adaptive 4-Phase Traffic Signal
 3. Closed Median + Protected U-Turn Corridor (Egyptian Axis Model)
 4. Modern 3-Lane Roundabout
+
+All values are deterministic HCM/Webster calculations. Every queue is bounded
+by the available upstream storage and every delay is finite, so an extreme
+slider combination reports "oversaturated" instead of producing delay or queue
+values in the millions.
 """
 
 import sys
@@ -24,8 +29,47 @@ from backend.app.models.schemas import (
 )
 
 
+MAIN_LANES_PER_DIRECTION = 2
+CROSS_LANES_PER_DIRECTION = 2
+MAIN_SATURATION_PER_LANE = 1900.0
+CROSS_SATURATION_PER_LANE = 1800.0
+LOST_TIME_SEC = 16.0
+ANALYSIS_PERIOD_H = 0.25  # 15-minute HCM analysis period
+MAX_DELAY_SEC = 300.0
+MAX_QUEUE_M = 500.0
+JAM_SPACING_M = 7.5
+PEAK_DIRECTION_SHARE = 0.55
+DEFAULT_UPSTREAM_STORAGE_M = 500.0
+
+
 def clamp(val: float, min_val: float, max_val: float) -> float:
     return max(min_val, min(max_val, val))
+
+
+def _bounded_delay(value: float) -> float:
+    if not math.isfinite(value):
+        return MAX_DELAY_SEC
+    return clamp(value, 0.0, MAX_DELAY_SEC)
+
+
+def _uniform_delay(cycle_sec: float, green_sec: float, vc: float) -> float:
+    """Webster/HCM uniform control delay for one approach."""
+    green_ratio = green_sec / max(1.0, cycle_sec)
+    denominator = 1.0 - min(0.98, max(0.0, vc)) * green_ratio
+    denominator = max(0.05, denominator)
+    return 0.5 * cycle_sec * (1.0 - green_ratio) ** 2 / denominator
+
+
+def _incremental_delay(capacity: float, vc: float) -> float:
+    """HCM incremental (overflow) delay term for a 15-minute analysis period."""
+    if capacity <= 0.0 or vc <= 1e-6:
+        return 0.0
+    k = 0.5
+    i = 1.0
+    term = (vc - 1.0) ** 2 + (
+        8.0 * k * i * vc / max(1.0, capacity * ANALYSIS_PERIOD_H)
+    )
+    return 900.0 * ANALYSIS_PERIOD_H * ((vc - 1.0) + math.sqrt(max(0.0, term)))
 
 
 def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
@@ -34,24 +78,38 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
     traffic flow theory and Webster's delay equations.
     """
     total_flow = inputs.main_flow + inputs.cross_flow
-    turn_ratio = inputs.turning_pct / 100.0
-    heavy_ratio = inputs.heavy_pct / 100.0
+    total_flow = max(1.0, total_flow)
+    turn_ratio = clamp(inputs.turning_pct / 100.0, 0.01, 0.60)
+    heavy_ratio = clamp(inputs.heavy_pct / 100.0, 0.0, 0.50)
+    heavy_factor = max(0.70, 1.0 - 0.5 * heavy_ratio)
+    turn_factor = max(0.80, 1.0 - 0.2 * turn_ratio)
 
     # -----------------------------------------------------------------------
     # Alternative 1: Uncontrolled Open Intersection
     # -----------------------------------------------------------------------
-    c_open = 3600.0 / (1.0 + turn_ratio * 1.2 + heavy_ratio * 0.8)
+    # A 4-leg, 8-lane uncontrolled junction cannot discharge at full saturation
+    # because every movement must accept a gap. Use 900 veh/h per approach lane
+    # as the gap-acceptance capacity, adjusted for turning and heavy vehicles.
+    open_lanes_total = 2 * (MAIN_LANES_PER_DIRECTION + CROSS_LANES_PER_DIRECTION)
+    c_open = 900.0 * open_lanes_total * turn_factor * max(0.75, 1.0 - 0.25 * heavy_ratio)
     vc_open = total_flow / max(1.0, c_open)
-    d_open = 9.5 + 28.0 * ((total_flow / max(1.0, c_open)) ** 2.6)
-    q95_open = max(15.0, (total_flow / 3600.0) * d_open * 6.5 * 0.45)
-    los_open = calculate_los(d_open, vc_open)
+    d_open = 9.5 + 28.0 * (min(vc_open, 3.0) ** 2.6)
+    q_open_veh = (
+        1.6 * (total_flow / 3600.0) * d_open
+        + max(0.0, total_flow - c_open) * ANALYSIS_PERIOD_H
+    )
+    q95_open = min(
+        MAX_QUEUE_M,
+        max(15.0, q_open_veh / max(1, MAIN_LANES_PER_DIRECTION) * JAM_SPACING_M),
+    )
+    los_open = calculate_los(d_open, vc_open, signalized=False)
 
     alt_open = IntersectionAlternative(
         id="OPEN",
         name_en="Uncontrolled Open Intersection",
         name_ar="تقاطع سطحي مفتوح بدون تحكم",
         conflict_points=32,
-        average_delay_sec=round(d_open, 1),
+        average_delay_sec=round(_bounded_delay(d_open), 1),
         queue_95th_m=round(q95_open, 1),
         capacity_vehh=round(c_open, 1),
         volume_to_capacity=round(vc_open, 2),
@@ -64,37 +122,74 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
     # -----------------------------------------------------------------------
     # Alternative 2: Adaptive Traffic Signal (Webster's Method)
     # -----------------------------------------------------------------------
-    s_main = 1900.0 * 3.0 * (1.0 - heavy_ratio / 2.0)
-    s_cross = 1800.0 * 2.0 * (1.0 - heavy_ratio / 2.0)
-
-    y_critical = min(
-        0.94,
-        (inputs.main_flow * 0.55 / s_main)
-        + (inputs.cross_flow * 0.65 / s_cross)
-        + (inputs.turning_pct / 250.0),
+    saturation_main = (
+        MAIN_SATURATION_PER_LANE
+        * MAIN_LANES_PER_DIRECTION
+        * heavy_factor
+        * turn_factor
     )
-    lost_time_l = 16.0  # seconds lost per cycle
-    c_opt = clamp((1.5 * lost_time_l + 5.0) / (1.0 - y_critical), 45.0, 160.0)
-
-    # Effective green ratio for main movement
-    g_c = max(
-        0.25,
-        (1.0 - lost_time_l / c_opt) * (inputs.main_flow / max(1.0, total_flow)),
+    saturation_cross = (
+        CROSS_SATURATION_PER_LANE
+        * CROSS_LANES_PER_DIRECTION
+        * heavy_factor
+        * turn_factor
     )
-    capacity_sig = s_main * g_c + s_cross * max(0.15, (1.0 - g_c - lost_time_l / c_opt))
-    x_sig = total_flow / max(1.0, capacity_sig)
 
-    # Webster uniform delay + overflow delay
-    d_sig_uniform = (0.5 * c_opt * ((1.0 - g_c) ** 2)) / (1.0 - min(0.98, x_sig) * g_c)
-    d_sig_overflow = 45.0 * max(0.0, x_sig - 0.85) * 120.0
-    d_sig = d_sig_uniform + d_sig_overflow
+    # The inputs are two-way corridor flows. A 55/45 directional split is the
+    # standard planning assumption; the critical lane group sees 55% of the
+    # two-way volume. The green split therefore uses the critical flow ratios,
+    # not an arbitrary fraction of the total flow.
+    y_main = PEAK_DIRECTION_SHARE * inputs.main_flow / max(1.0, saturation_main)
+    y_cross = PEAK_DIRECTION_SHARE * inputs.cross_flow / max(1.0, saturation_cross)
+    y_raw = y_main + y_cross
+    y_for_cycle = min(0.95, max(0.02, y_raw))
+    raw_cycle = (1.5 * LOST_TIME_SEC + 5.0) / (1.0 - y_for_cycle)
+    cycle_sec = clamp(raw_cycle, 45.0, 160.0)
 
-    # 95th Percentile Queue
-    q95_sig = (
-        (inputs.main_flow / 3600.0)
-        * (c_opt * (1.0 - g_c))
-        * (6.5 / 3.0)
-        * (1.0 + max(0.0, x_sig - 0.75) * 2.2)
+    effective_green = max(16.0, cycle_sec - LOST_TIME_SEC)
+    if y_raw > 1e-9:
+        green_main = max(8.0, effective_green * y_main / y_raw)
+        green_cross = max(8.0, effective_green - green_main)
+    else:
+        green_main = effective_green / 2.0
+        green_cross = effective_green / 2.0
+    cycle_sec = green_main + green_cross + LOST_TIME_SEC
+
+    capacity_main = (
+        2.0 * saturation_main * green_main / max(1.0, cycle_sec)
+    )  # both directions
+    capacity_cross = 2.0 * saturation_cross * green_cross / max(1.0, cycle_sec)
+    capacity_sig = capacity_main + capacity_cross
+    x_main = inputs.main_flow / max(1.0, capacity_main)
+    x_cross = inputs.cross_flow / max(1.0, capacity_cross)
+    x_sig = max(x_main, x_cross)
+
+    d1_main = _uniform_delay(cycle_sec, green_main, x_main)
+    d1_cross = _uniform_delay(cycle_sec, green_cross, x_cross)
+    d2_main = _incremental_delay(capacity_main, x_main)
+    d2_cross = _incremental_delay(capacity_cross, x_cross)
+    d_sig = (
+        inputs.main_flow * (d1_main + d2_main)
+        + inputs.cross_flow * (d1_cross + d2_cross)
+    ) / total_flow
+
+    red_main = max(0.0, cycle_sec - green_main)
+    red_cross = max(0.0, cycle_sec - green_cross)
+    q_main_veh = (
+        1.5 * (PEAK_DIRECTION_SHARE * inputs.main_flow / 3600.0) * red_main
+        + max(0.0, inputs.main_flow - capacity_main) * ANALYSIS_PERIOD_H
+    )
+    q_cross_veh = (
+        1.5 * (PEAK_DIRECTION_SHARE * inputs.cross_flow / 3600.0) * red_cross
+        + max(0.0, inputs.cross_flow - capacity_cross) * ANALYSIS_PERIOD_H
+    )
+    q95_sig = min(
+        MAX_QUEUE_M,
+        max(
+            15.0,
+            q_main_veh / MAIN_LANES_PER_DIRECTION * JAM_SPACING_M,
+            q_cross_veh / CROSS_LANES_PER_DIRECTION * JAM_SPACING_M,
+        ),
     )
     los_sig = calculate_los(d_sig, x_sig)
 
@@ -103,12 +198,12 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
         name_en="Adaptive 4-Phase Traffic Signal",
         name_ar="إشارة ضوئية ذكية رباعية الأطوار",
         conflict_points=8,
-        average_delay_sec=round(d_sig, 1),
+        average_delay_sec=round(_bounded_delay(d_sig), 1),
         queue_95th_m=round(q95_sig, 1),
         capacity_vehh=round(capacity_sig, 1),
         volume_to_capacity=round(x_sig, 2),
         level_of_service=los_sig,
-        spillback_risk=q95_sig > 350.0 or x_sig > 0.95,
+        spillback_risk=q95_sig > 300.0 or x_sig > 1.0,
         safety_index_pct=75.0,
         estimated_throughput_pce=round(min(total_flow, capacity_sig), 1),
     )
@@ -116,58 +211,86 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
     # -----------------------------------------------------------------------
     # Alternative 3: Closed Median + Protected U-Turn Corridor
     # -----------------------------------------------------------------------
-    # Diverted cross and left traffic
-    p_div = (inputs.cross_flow + inputs.main_flow * turn_ratio) / max(1.0, total_flow)
-    # Cruise speed along detour is 50 km/h (13.89 m/s)
+    # The mainline keeps four lanes in total. Diverted cross/left traffic uses a
+    # protected U-turn opening with an additional 1,200 veh/h capacity.
+    c_mainline = 4.0 * MAIN_SATURATION_PER_LANE * heavy_factor
+    c_uturn = c_mainline + 1200.0 * heavy_factor
+    vc_uturn = total_flow / max(1.0, c_uturn)
+
+    p_div = clamp(
+        (inputs.cross_flow + inputs.main_flow * turn_ratio) / total_flow,
+        0.0,
+        1.0,
+    )
     v_cruise_ms = 50.0 / 3.6
     t_detour = (2.0 * inputs.uturn_distance_m) / v_cruise_ms
     d_weave = 6.0 + 14.0 * ((total_flow / 6800.0) ** 2.1)
-    d_uturn = (p_div * t_detour * 0.55) + d_weave
+    d_uturn = (
+        p_div * max(0.0, t_detour - 15.0)
+        + d_weave
+        + _incremental_delay(c_uturn, vc_uturn)
+    )
 
-    c_uturn = 7200.0  # High continuous mainline capacity (merging only)
-    vc_uturn = total_flow / c_uturn
-    q95_uturn = max(12.0, d_uturn * 1.4)
-    los_uturn = calculate_los(d_uturn, vc_uturn)
+    diverted_veh = p_div * total_flow
+    q_uturn_veh = (
+        1.5 * (diverted_veh / 3600.0) * d_uturn
+        + max(0.0, total_flow - c_uturn) * ANALYSIS_PERIOD_H
+    )
+    q95_uturn = min(MAX_QUEUE_M, max(12.0, q_uturn_veh * JAM_SPACING_M))
+    los_uturn = calculate_los(d_uturn, vc_uturn, signalized=False)
 
     alt_uturn = IntersectionAlternative(
         id="UTURN",
         name_en="Closed Median + Protected U-Turn Corridor",
         name_ar="إلغاء التقاطع + محور دوران للخلف (نموذج المحاور المصرية)",
         conflict_points=4,
-        average_delay_sec=round(d_uturn, 1),
+        average_delay_sec=round(_bounded_delay(d_uturn), 1),
         queue_95th_m=round(q95_uturn, 1),
         capacity_vehh=round(c_uturn, 1),
         volume_to_capacity=round(vc_uturn, 2),
         level_of_service=los_uturn,
-        spillback_risk=False,
-        safety_index_pct=92.0,  # Eliminates all right-angle perpendicular collisions
+        spillback_risk=q95_uturn > 300.0 or vc_uturn > 1.0,
+        safety_index_pct=92.0,  # Eliminates right-angle perpendicular collisions
         estimated_throughput_pce=round(min(total_flow, c_uturn), 1),
     )
 
     # -----------------------------------------------------------------------
     # Alternative 4: Modern 3-Lane Roundabout
     # -----------------------------------------------------------------------
-    q_circ = 0.42 * inputs.main_flow + 0.65 * inputs.cross_flow * (1.0 + turn_ratio)
-    c_round = 3.0 * 1350.0 * math.exp(-0.00075 * q_circ)
+    # HCM-style entry capacity. Four approaches with two entry lanes each give
+    # eight entry lanes; capacity falls as the circulating flow increases.
+    entry_lanes = 4 * 2
+    q_circ = 0.45 * inputs.main_flow + 0.55 * inputs.cross_flow * (1.0 + turn_ratio)
+    q_circ_per_entry = q_circ / 4.0
+    c_entry = (
+        1130.0
+        * math.exp(-0.0007 * q_circ_per_entry)
+        * max(0.70, 1.0 - 0.5 * heavy_ratio)
+    )
+    c_round = c_entry * entry_lanes
     vc_round = total_flow / max(1.0, c_round)
 
     d_round = (
-        11.0
-        + (3600.0 / max(1.0, c_round))
-        + 65.0 * ((max(0.0, vc_round - 0.75)) ** 2.2) * 100.0
+        3600.0 / max(1.0, c_entry)
+        + 5.0  # HCM driver impatience / control delay floor
+        + _incremental_delay(c_round, vc_round)
     )
-    q95_round = max(
-        18.0,
-        vc_round * 65.0 * (1.0 + max(0.0, vc_round - 0.85) * 4.5),
+    q_round_veh = (
+        1.6 * (total_flow / 3600.0) * d_round
+        + max(0.0, total_flow - c_round) * ANALYSIS_PERIOD_H
     )
-    los_round = calculate_los(d_round, vc_round)
+    q95_round = min(
+        MAX_QUEUE_M,
+        max(18.0, q_round_veh / 2.0 * JAM_SPACING_M),
+    )
+    los_round = calculate_los(d_round, vc_round, signalized=False)
 
     alt_round = IntersectionAlternative(
         id="ROUNDABOUT",
         name_en="Modern 3-Lane High-Capacity Roundabout",
         name_ar="ميدان دائري حديث ثلاثي الحارات",
         conflict_points=8,
-        average_delay_sec=round(d_round, 1),
+        average_delay_sec=round(_bounded_delay(d_round), 1),
         queue_95th_m=round(q95_round, 1),
         capacity_vehh=round(c_round, 1),
         volume_to_capacity=round(vc_round, 2),
@@ -180,66 +303,82 @@ def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:
     alternatives = [alt_open, alt_signal, alt_uturn, alt_round]
 
     # -----------------------------------------------------------------------
-    # Winning Recommendation Logic
+    # Winning Recommendation Logic (data-driven)
     # -----------------------------------------------------------------------
-    # On high arterial volumes (>3000 main flow), Closed Median U-turn dominates because
-    # it completely eliminates mainline red light queues and right-angle collision points.
-    if inputs.main_flow >= 2800.0:
-        recommended_id = "UTURN"
-        rationale_en = (
-            f"At high mainline arterial demand ({inputs.main_flow:.0f} veh/h), installing a traffic light "
-            f"creates severe shockwave queues ({q95_sig:.0f}m) and high delay ({d_sig:.1f}s, LoS {los_sig}). "
-            f"The Protected U-Turn Corridor model completely eliminates mainline red-phase stopping, reduces "
-            f"conflict points from 32 down to 4 (merging only), and delivers continuous flow with average delay "
-            f"of just {d_uturn:.1f}s (LoS {los_uturn})."
-        )
-        rationale_ar = (
-            f"نظراً للكثافة العالية على المحور الرئيسي ({inputs.main_flow:.0f} مركبة/س)، فإن تركيب إشارة ضوئية "
-            f"يسبب طوابير تكدس حادة تصل إلى {q95_sig:.0f} متر وتأخير قدره {d_sig:.1f} ثانية (مستوى خدمة {los_sig}). "
-            f"يعد نموذج إلغاء التقاطع وتطبيق دوران محمي للخلف (U-Turn) هو الحل الهندسي الأمثل، حيث يقضي تماماً على "
-            f"توقف الحركة الرئيسية، ويخفض نقاط التعارض من 32 إلى 4 نقاط فقط، مع زمن تأخير {d_uturn:.1f} ثانية (مستوى خدمة {los_uturn})."
-        )
-    elif total_flow < 2200.0 and inputs.cross_flow > 600.0:
-        recommended_id = "ROUNDABOUT"
-        rationale_en = (
-            f"Under moderate, balanced traffic conditions ({total_flow:.0f} total veh/h), the Modern 3-Lane "
-            f"Roundabout provides self-regulating continuous circulation with low delay ({d_round:.1f}s) "
-            f"and avoids signal operating/maintenance electricity costs."
-        )
-        rationale_ar = (
-            f"في ظل الكثافات المتوسطة والمتوازنة ({total_flow:.0f} مركبة/س)، يحقق الميدان الدائري الثلاثي تدفقاً ذاتياً "
-            f"مستمراً بتأخير منخفض ({d_round:.1f} ثانية) مع توفير تكاليف تشغيل وصيانة الإشارات الضوئية."
-        )
-    else:
-        # Check lowest delay between Signal and U-Turn
-        if d_uturn <= d_sig:
-            recommended_id = "UTURN"
-            rationale_en = (
-                f"The Protected U-Turn Corridor minimizes average vehicular delay ({d_uturn:.1f}s vs {d_sig:.1f}s for signal) "
-                f"while maintaining high corridor progression speed and cutting conflict points to 4."
-            )
-            rationale_ar = (
-                f"يحقق نموذج الدوران للخلف أقل زمن تأخير للمركبات ({d_uturn:.1f} ثانية مقابل {d_sig:.1f} ثانية للإشارة) "
-                f"مع الحفاظ على سرعة المحور وخفض نقاط الحوادث إلى 4 نقاط."
-            )
-        else:
-            recommended_id = "SIGNAL"
-            rationale_en = (
-                f"The Adaptive 4-Phase Traffic Signal provides optimal balance ({d_sig:.1f}s delay, LoS {los_sig}) "
-                f"by allocating dynamic green splits to cross-street demands with optimal cycle length of {c_opt:.0f}s."
-            )
-            rationale_ar = (
-                f"تحقق الإشارة الضوئية الذكية أفضل توازن ({d_sig:.1f} ثانية تأخير، مستوى خدمة {los_sig}) عبر تخصيص فترات "
-                f"خضراء متكيفة مع دورة زمنية مثالية قدرها {c_opt:.0f} ثانية."
-            )
+    # For each alternative, rank by control delay with explicit penalties for
+    # oversaturation, spillback and poor safety. This replaces the old rule
+    # that always selected the U-turn whenever mainline flow exceeded 2,800
+    # veh/h, even when the computed U-turn delay was worse than the signal.
+    def _score(alt: IntersectionAlternative) -> float:
+        penalty = 0.0
+        # An uncontrolled 4-leg junction is not an acceptable design once the
+        # major approach exceeds the HCM signal-warrant range. Without this,
+        # the lowest-delay arithmetic could recommend a 32-conflict open
+        # junction at 8,000+ veh/h simply because its delay is slightly lower.
+        if alt.id == "OPEN" and total_flow > 4000.0:
+            penalty += 80.0
+        if alt.volume_to_capacity > 1.0:
+            penalty += 60.0
+        if alt.spillback_risk:
+            penalty += 30.0
+        penalty += max(0.0, 100.0 - alt.safety_index_pct) * 0.08
+        return alt.average_delay_sec + penalty
 
+    winner = min(alternatives, key=_score)
+    recommended_id = winner.id
+
+    condition_en = (
+        "The least-delay option is still oversaturated at this demand, so the "
+        "scheme must be paired with upstream metering or demand management."
+        if winner.volume_to_capacity > 1.0
+        else (
+            "The 95th-percentile queue reaches the upstream storage limit, so "
+            "spillback mitigation is required."
+            if winner.spillback_risk
+            else "The selected option stays within capacity with no spillback."
+        )
+    )
+    condition_ar = (
+        "الخيار الأقل تأخيراً لا يزال مشبعاً عند هذا الطلب، لذا يجب دمجه مع تنظيم "
+        "التدفق من المنبع أو إدارة الطلب."
+        if winner.volume_to_capacity > 1.0
+        else (
+            "الطابور المئوي 95 يصل إلى حد السعة الخلفية، لذا يلزم اتخاذ إجراءات لمنع الارتداد."
+            if winner.spillback_risk
+            else "الخيار المختار يعمل داخل حدود السعة دون ارتداد للطابور."
+        )
+    )
+
+    rationale_en = (
+        f"At {total_flow:.0f} veh/h total demand ({inputs.main_flow:.0f} main + "
+        f"{inputs.cross_flow:.0f} cross), {winner.name_en} gives the lowest "
+        f"weighted control delay ({winner.average_delay_sec:.1f}s, LoS "
+        f"{winner.level_of_service}), a 95th-percentile queue of "
+        f"{winner.queue_95th_m:.0f}m, v/c {winner.volume_to_capacity:.2f}, "
+        f"{winner.conflict_points} conflict points and a "
+        f"{winner.safety_index_pct:.0f}% safety index. {condition_en}"
+    )
+    rationale_ar = (
+        f"عند طلب إجمالي {total_flow:.0f} مركبة/ساعة ({inputs.main_flow:.0f} على المحور "
+        f"و{inputs.cross_flow:.0f} على الشارع العرضي)، يحقق {winner.name_ar} أقل تأخير "
+        f"مرجح ({winner.average_delay_sec:.1f} ثانية، مستوى خدمة "
+        f"{winner.level_of_service})، وطابور مئوي 95 بطول "
+        f"{winner.queue_95th_m:.0f} متر، ونسبة استيعاب {winner.volume_to_capacity:.2f}، "
+        f"مع {winner.conflict_points} نقاط تعارض ومؤشر أمان "
+        f"{winner.safety_index_pct:.0f}%. {condition_ar}"
+    )
+
+    safety_gain = winner.safety_index_pct - alt_open.safety_index_pct
     takeaway_en = (
-        f"DECISION SUMMARY: Recommended implementation is {recommended_id}. "
-        f"Estimated safety improvement: +{next(a.safety_index_pct for a in alternatives if a.id == recommended_id) - 25.0:.0f}% over baseline."
+        f"DECISION SUMMARY: Recommended implementation is {winner.id} "
+        f"({winner.name_en}). Estimated safety improvement: "
+        f"+{safety_gain:.0f}% over the open baseline; delay "
+        f"{winner.average_delay_sec:.1f}s vs {alt_open.average_delay_sec:.1f}s."
     )
     takeaway_ar = (
-        f"ملخص القرار: الخيار الموصى به هو {next(a.name_ar for a in alternatives if a.id == recommended_id)}. "
-        f"نسبة تحسين الأمان والسلامة: +{next(a.safety_index_pct for a in alternatives if a.id == recommended_id) - 25.0:.0f}% مقارنة بالتقاطع المفتوح."
+        f"ملخص القرار: الخيار الموصى به هو {winner.name_ar}. نسبة تحسين الأمان: "
+        f"+{safety_gain:.0f}% مقارنة بالتقاطع المفتوح؛ التأخير "
+        f"{winner.average_delay_sec:.1f} ثانية مقابل {alt_open.average_delay_sec:.1f} ثانية."
     )
 
     return IntersectionResponse(

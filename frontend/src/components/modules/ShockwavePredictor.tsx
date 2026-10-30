@@ -54,6 +54,7 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
       setData(res);
     } catch (err) {
       console.error(err);
+      setData(null);
     } finally {
       setLoading(false);
     }
