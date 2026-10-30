@@ -24,8 +24,9 @@ A full-stack, production-grade **Intelligent Traffic Decision Support System (IT
    - **Module 3 (Incident Shockwave Predictor):** LWR backward shockwave propagation speed ($w$ km/h), urgent countdown to upstream exit blockage ($T_{\text{block}}$ minutes), 60-minute queue progression curve, and micro-friction remedies.
    - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel time savings %, and configurable Green Wave signal progression offsets (450 m node spacing).
 3. **Live 60fps Microscopic Canvases:**
-   - `HighwayCanvas.tsx`: Animated 4-lane highway with class-colored vehicles, work-zone cones, lane merging, and shockwave queues.
-   - `IntersectionCanvas.tsx`: Split-screen animated comparison between Traffic Signal stop-and-go waves and Protected U-Turn continuous flow.
+   - `HighwayCanvas.tsx`: Seeded Poisson arrivals (PCE-calibrated vehicle mix), IDM car-following, mandatory work-zone merge, and live measured flow/queue/delay/speed.
+   - `IntersectionCanvas.tsx`: Webster-timed 4-phase signal vs protected U-Turn corridor, IDM car-following, right-turn Bezier geometry with right-turn-on-red, and live measured KPIs.
+   - Both canvases run an independent deterministic browser-side microsimulation; they are not SUMO renders and never display fabricated telemetry.
 4. **Bilingual Executive Readiness (RTL / LTR):** Instant toggle between English (LTR) and Egyptian / Standard Arabic (RTL) with dynamic `dir="rtl"` layout switching.
 5. **Real-time Edge CV Ingestion Webhook:** `POST /api/cv/ingest` ready for YOLOv8/v11 + ByteTrack camera feeds.
 
@@ -166,11 +167,14 @@ npm run dev
 
 ---
 
-## Optional SUMO / TraCI Digital Twin
+## Optional SUMO / TraCI Digital Twin (Backend & API)
 
 The analytical HCM/Webster/LWR engines are always available. If Eclipse SUMO
 and the `traci`/`sumolib` Python packages are installed, the platform also runs
-vehicle-by-vehicle microscopic simulations through the native C++ SUMO core:
+vehicle-by-vehicle microscopic simulations through the native C++ SUMO core.
+The browser UI does not expose a SUMO engine switch; native SUMO remains
+available through the API and is used by automated validation and the test
+suite.
 
 ```bash
 winget install Eclipse.SUMO

@@ -34,7 +34,13 @@ except ImportError:
     traci = None
     HAS_TRACI_PACKAGE = False
 
-from backend.app.sumo.generator import generate_demand_xml, generate_workzone_demand_xml
+from backend.app.sumo.generator import (
+    VEHICLE_PCE,
+    average_pce,
+    generate_demand_xml,
+    generate_workzone_demand_xml,
+    pce_to_vehicle_flow,
+)
 
 
 # Directory containing network templates
@@ -651,46 +657,79 @@ def _run_calibrated_micro_emulation(
     }
 
 
+def _workzone_calibrated_fallback(
+    closed_lanes: List[int],
+    demand_pce: float,
+    speed_limit_kmh: float,
+    duration_sec: int,
+    heavy_pct: float,
+) -> Dict[str, Any]:
+    """Calibrated HCM fallback used only when a native SUMO runtime is unavailable."""
+    n_closed = len(closed_lanes)
+    open_lanes = max(1, 4 - n_closed)
+    c_drop = 0.14 if (1 in closed_lanes or 2 in closed_lanes) else 0.10
+    cap = open_lanes * 1900.0 * (1.0 - c_drop)
+    vc = demand_pce / max(1.0, cap)
+    q_len = max(0.0, (demand_pce - cap) * (6.8 / open_lanes) * 0.5) if vc > 1.0 else max(10.0, vc * 35.0)
+    delay = 8.5 + 45.0 * (vc ** 3.0) if vc > 1.0 else 5.0 + 12.0 * (vc ** 1.8)
+    physical_rate = pce_to_vehicle_flow(demand_pce, heavy_pct) / 3600.0
+    return {
+        "is_native_sumo": False,
+        "engine": "SUMO Digital Twin (Calibrated Fallback)",
+        "simulated_vehicles_count": int(round(physical_rate * duration_sec)),
+        "bottleneck_throughput_pce": round(min(demand_pce, cap), 1),
+        "max_queue_m": round(q_len, 1),
+        "average_delay_sec": round(delay, 1),
+        "average_speed_kmh": round(max(15.0, speed_limit_kmh * (1.0 - min(0.85, vc * 0.6))), 1),
+        "weaving_turbulence_index": round(min(1.0, 0.25 * n_closed + (vc * 0.4)), 2),
+        "co2_emissions_kg_h": round((demand_pce * 260.0) / 1000.0, 1),
+        "fuel_consumption_l_h": round((demand_pce * 260.0 * 0.42) / 1000.0, 1),
+        "heavy_vehicle_pct": round(heavy_pct, 1),
+        "pce_per_vehicle": round(average_pce(heavy_pct), 2),
+        "demand_pce": round(demand_pce, 1),
+        "collisions_detected": 0,
+        "teleports_detected": 0,
+    }
+
+
 def execute_traci_workzone_sim(
     closed_lanes: List[int],
     demand_pce: float,
     speed_limit_kmh: float = 80.0,
     duration_sec: int = 60,
+    heavy_pct: float = 12.0,
 ) -> Dict[str, Any]:
     """
     Executes a real SUMO / TraCI microscopic work-zone simulation.
-    Closes the requested lanes on a 4-lane Egyptian highway corridor, simulates
-    vehicle-by-vehicle bottleneck merging, and computes microscopic friction metrics.
+
+    The demand is converted from PCE/h to physical vehicles/h, the requested
+    lanes are removed from the downstream work-zone segment, and every reported
+    metric (bottleneck throughput, positional queue, delay, speed, emissions and
+    lane-change turbulence) is measured from the TraCI trajectory stream rather
+    than derived analytically. A fixed seed and warm-up window make repeated
+    runs comparable.
     """
     ensure_traci()
     sumo_bin = find_sumo_binary()
     net_file = NETWORKS_DIR / "highway_4lane.net.xml"
 
     if not (HAS_TRACI_PACKAGE and sumo_bin and net_file.exists()):
-        # Calibrated fallback
-        n_closed = len(closed_lanes)
-        open_lanes = max(1, 4 - n_closed)
-        c_drop = 0.14 if (1 in closed_lanes or 2 in closed_lanes) else 0.10
-        cap = open_lanes * 1900.0 * (1.0 - c_drop)
-        vc = demand_pce / max(1.0, cap)
-        q_len = max(0.0, (demand_pce - cap) * (6.8 / open_lanes) * 0.5) if vc > 1.0 else max(10.0, vc * 35.0)
-        delay = 8.5 + 45.0 * (vc ** 3.0) if vc > 1.0 else 5.0 + 12.0 * (vc ** 1.8)
-        return {
-            "is_native_sumo": False,
-            "engine": "SUMO Digital Twin (Calibrated Fallback)",
-            "simulated_vehicles_count": int((demand_pce / 3600.0) * duration_sec),
-            "bottleneck_throughput_pce": round(min(demand_pce, cap), 1),
-            "max_queue_m": round(q_len, 1),
-            "average_delay_sec": round(delay, 1),
-            "average_speed_kmh": round(max(15.0, speed_limit_kmh * (1.0 - min(0.85, vc * 0.6))), 1),
-            "weaving_turbulence_index": round(min(1.0, 0.25 * n_closed + (vc * 0.4)), 2),
-            "co2_emissions_kg_h": round((demand_pce * 260.0) / 1000.0, 1),
-            "fuel_consumption_l_h": round((demand_pce * 260.0 * 0.42) / 1000.0, 1),
-        }
+        return _workzone_calibrated_fallback(
+            closed_lanes, demand_pce, speed_limit_kmh, duration_sec, heavy_pct
+        )
+
+    # A 600 m approach + 600 m work-zone segment needs enough time for the
+    # bottleneck queue to establish and for the flow measurement to reach
+    # steady state, even when the caller asks for a short stress test.
+    sim_duration = max(int(duration_sec), 180)
+    warmup_sec = min(60.0, max(20.0, sim_duration * 0.33))
+    step_length = 0.5
 
     routes_xml = generate_workzone_demand_xml(
         demand_pce=demand_pce,
-        duration_sec=duration_sec,
+        heavy_pct=heavy_pct,
+        duration_sec=sim_duration,
+        seed=42,
     )
 
     with _sim_lock:
@@ -708,13 +747,16 @@ def execute_traci_workzone_sim(
     </input>
     <time>
         <begin value="0"/>
-        <end value="{duration_sec}"/>
-        <step-length value="1.0"/>
+        <end value="{sim_duration}"/>
+        <step-length value="{step_length}"/>
     </time>
     <processing>
         <collision.action value="none"/>
         <time-to-teleport value="300"/>
     </processing>
+    <random_number>
+        <seed value="42"/>
+    </random_number>
     <report>
         <no-step-log value="true"/>
         <no-warnings value="true"/>
@@ -732,6 +774,7 @@ def execute_traci_workzone_sim(
                 "--no-warnings", "true",
                 "--duration-log.disable", "true",
                 "--quit-on-end", "true",
+                "--seed", "42",
             ]
 
             # Ensure environment
@@ -742,104 +785,180 @@ def execute_traci_workzone_sim(
             if bin_dir not in os.environ.get("PATH", ""):
                 os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
-            veh_final_time_loss = {}
-            queue_samples = []
+            # --- TraCI measurement state -------------------------------------
+            veh_pce: Dict[str, float] = {}
+            veh_time_loss: Dict[str, float] = {}
+            prev_lanes: Dict[str, int] = {}
+            sampled_vehs = set()
+            measured_vehs = set()
+            crossed_vehs = set()
+            crossed_pces: List[float] = []
+            crossed_delays: List[float] = []
+            queue_m_samples: List[float] = []
+            queue_veh_samples: List[int] = []
+
             co2_total_mg = 0.0
-            fuel_total_ml = 0.0
+            fuel_total_mg = 0.0
             speeds_sum = 0.0
             speed_samples = 0
             lane_changes_count = 0
-            sampled_vehs = set()
-            arrived_vehs = 0
+            collisions_detected = 0
+            teleports_detected = 0
+
+            upstream_length_m = 600.0
+            measurement_sec = max(1.0, sim_duration - warmup_sec)
+            approach_speed_ms = max(5.0, speed_limit_kmh / 3.6)
+            workzone_speed_ms = max(5.0, min(float(speed_limit_kmh), 60.0) / 3.6)
 
             try:
                 traci.start(sumo_cmd)
 
-                # Dynamically close requested lanes on downstream segment
-                # Lane 1 = index 0, Lane 2 = index 1, Lane 3 = index 2, Lane 4 = index 3
+                # Approach and work-zone speed limits.
+                for idx in range(4):
+                    traci.lane.setMaxSpeed(f"E_HWY_UPSTREAM_{idx}", approach_speed_ms)
+                    traci.lane.setMaxSpeed(f"E_HWY_DOWNSTREAM_{idx}", workzone_speed_ms)
+
+                # Remove the requested lanes from the downstream work-zone
+                # segment. "authority" is never generated, so the lane is
+                # physically unavailable to the simulated fleet without the
+                # artificial 0.001 m/s wall that distorted car-following.
                 for lane_num in closed_lanes:
                     l_idx = max(0, min(3, lane_num - 1))
                     lane_id = f"E_HWY_DOWNSTREAM_{l_idx}"
                     try:
-                        traci.lane.setAllowed(lane_id, [])
-                        traci.lane.setMaxSpeed(lane_id, 0.001)
+                        traci.lane.setAllowed(lane_id, ["authority"])
                     except Exception as err:
                         logger.warning(f"Failed to close lane {lane_id}: {err}")
 
-                step = 0
-                prev_lanes = {}  # vid -> lane_index
-                while step < duration_sec:
+                while traci.simulation.getTime() < sim_duration:
                     traci.simulationStep()
-                    step += 1
-
+                    sim_time = traci.simulation.getTime()
+                    measure = sim_time >= warmup_sec
                     veh_ids = traci.vehicle.getIDList()
+
                     halting = 0
+                    slow_positions: Dict[int, List[float]] = {0: [], 1: [], 2: [], 3: []}
+
                     for vid in veh_ids:
                         sampled_vehs.add(vid)
+                        if vid not in veh_pce:
+                            vtype = traci.vehicle.getTypeID(vid)
+                            veh_pce[vid] = VEHICLE_PCE.get(vtype, 1.0)
+
                         tl = traci.vehicle.getTimeLoss(vid)
                         spd = traci.vehicle.getSpeed(vid)
-                        co2 = traci.vehicle.getCO2Emission(vid)
-                        fuel = traci.vehicle.getFuelConsumption(vid)
-                        cur_lane = traci.vehicle.getLaneIndex(vid)
+                        road = traci.vehicle.getRoadID(vid)
+                        veh_time_loss[vid] = tl
 
-                        veh_final_time_loss[vid] = tl
-                        co2_total_mg += co2
-                        fuel_total_ml += fuel
-                        speeds_sum += spd
-                        speed_samples += 1
+                        if measure:
+                            measured_vehs.add(vid)
+                            co2_total_mg += traci.vehicle.getCO2Emission(vid) * step_length
+                            fuel_total_mg += traci.vehicle.getFuelConsumption(vid) * step_length
+                            speeds_sum += spd
+                            speed_samples += 1
 
-                        if vid in prev_lanes and prev_lanes[vid] != cur_lane:
-                            lane_changes_count += 1
-                        prev_lanes[vid] = cur_lane
+                            cur_lane = traci.vehicle.getLaneIndex(vid)
+                            if vid in prev_lanes and prev_lanes[vid] != cur_lane:
+                                lane_changes_count += 1
+                            prev_lanes[vid] = cur_lane
 
-                        if spd < 0.5:
-                            halting += 1
+                            if road == "E_HWY_UPSTREAM" and spd < 3.0:
+                                halting += 1
+                                pos = traci.vehicle.getLanePosition(vid)
+                                slow_positions[max(0, min(3, cur_lane))].append(pos)
 
-                    queue_samples.append(halting)
-                    arrived_vehs += traci.simulation.getArrivedNumber()
+                        # Measure the bottleneck flow when the vehicle crosses
+                        # from the approach edge into the work-zone segment.
+                        if road.startswith("E_HWY_DOWNSTREAM") and vid not in crossed_vehs:
+                            crossed_vehs.add(vid)
+                            if measure:
+                                crossed_pces.append(veh_pce[vid])
+                                crossed_delays.append(tl)
+
+                    if measure:
+                        # Contiguous queue only: walk backward from the merge
+                        # point while successive slow vehicles are closely spaced.
+                        queue_back_m = 0.0
+                        for lane_positions in slow_positions.values():
+                            if not lane_positions:
+                                continue
+                            lane_positions.sort(reverse=True)
+                            queue_end = upstream_length_m
+                            for pos in lane_positions:
+                                if queue_end - pos <= 40.0:
+                                    queue_end = pos
+                                else:
+                                    break
+                            queue_back_m = max(queue_back_m, upstream_length_m - queue_end)
+                        queue_m_samples.append(queue_back_m)
+                        queue_veh_samples.append(halting)
+
+                    collisions_detected += traci.simulation.getCollidingVehiclesNumber()
+                    teleports_detected += traci.simulation.getStartingTeleportNumber()
 
             except Exception as e:
                 logger.warning(f"execute_traci_workzone_sim TraCI warning: {e}")
+                return _workzone_calibrated_fallback(
+                    closed_lanes, demand_pce, speed_limit_kmh, duration_sec, heavy_pct
+                )
             finally:
                 try:
                     traci.close()
                 except Exception:
                     pass
 
-            total_sim = max(1, len(sampled_vehs))
-            total_tl = sum(veh_final_time_loss.values())
-            avg_delay = round(total_tl / total_sim, 1)
+            total_sim = len(sampled_vehs)
+            measured_throughput_pce = (
+                (sum(crossed_pces) * 3600.0 / measurement_sec) if crossed_pces else 0.0
+            )
+            avg_delay = (
+                round(sum(crossed_delays) / max(1, len(crossed_delays)), 1)
+                if crossed_delays
+                else round(
+                    sum(veh_time_loss.values()) / max(1, len(veh_time_loss)), 1
+                )
+            )
+
+            def percentile(values: List[float], pct: float) -> float:
+                if not values:
+                    return 0.0
+                ordered = sorted(values)
+                idx = min(len(ordered) - 1, int(pct * len(ordered)))
+                return ordered[idx]
+
+            q_95_m = percentile(queue_m_samples, 0.95)
+            q_95_vehs = percentile([float(v) for v in queue_veh_samples], 0.95)
+
+            turbulence = round(
+                min(1.0, lane_changes_count / max(1.0, len(measured_vehs) * 0.8)), 2
+            )
+
             mean_spd = round((speeds_sum / max(1, speed_samples)) * 3.6, 1)
-
-            # 95th queue
-            if queue_samples:
-                sorted_q = sorted(queue_samples)
-                idx_95 = int(0.95 * len(sorted_q))
-                q_95_vehs = sorted_q[min(idx_95, len(sorted_q) - 1)]
-            else:
-                q_95_vehs = 0
-            # Upstream queue distributed across 4 open approach lanes
-            q_95_m = round((q_95_vehs / 4.0) * 6.8, 1)
-
-            # Weaving turbulence index: lane changes normalized per vehicle
-            turbulence = round(min(1.0, lane_changes_count / max(1.0, total_sim * 0.8)), 2)
-
-            # Bottleneck effective capacity under closed lanes and weaving turbulence
-            open_lanes = max(1, 4 - len(closed_lanes))
-            bottleneck_capacity = round(open_lanes * 1950.0 * (1.0 - 0.08 * len(closed_lanes)), 1)
-            exit_rate_pce = round(min(demand_pce, bottleneck_capacity * (1.0 - turbulence * 0.08)), 1)
+            co2_kg_h = round((co2_total_mg / 1e6) * (3600.0 / measurement_sec), 2)
+            fuel_l_h = round((fuel_total_mg / 840_000.0) * (3600.0 / measurement_sec), 2)
 
             return {
                 "is_native_sumo": True,
                 "engine": "SUMO / TraCI (C++ Highway Bottleneck Core)",
                 "simulated_vehicles_count": total_sim,
-                "bottleneck_throughput_pce": exit_rate_pce,
-                "max_queue_m": q_95_m,
+                "bottleneck_throughput_pce": round(measured_throughput_pce, 1),
+                "max_queue_m": round(q_95_m, 1),
                 "average_delay_sec": avg_delay,
                 "average_speed_kmh": mean_spd,
                 "weaving_turbulence_index": turbulence,
-                "co2_emissions_kg_h": round((co2_total_mg / 1e6) * (3600.0 / max(1, duration_sec)), 2),
-                "fuel_consumption_l_h": round((fuel_total_ml / 840_000.0) * (3600.0 / max(1, duration_sec)), 2),
+                "co2_emissions_kg_h": co2_kg_h,
+                "fuel_consumption_l_h": fuel_l_h,
+                "heavy_vehicle_pct": round(heavy_pct, 1),
+                "pce_per_vehicle": round(average_pce(heavy_pct), 2),
+                "demand_pce": round(demand_pce, 1),
+                "closed_lanes": list(closed_lanes),
+                "warmup_sec": round(warmup_sec, 1),
+                "measurement_sec": round(measurement_sec, 1),
+                "queue_vehicles_95th": int(round(q_95_vehs)),
+                "collisions_detected": int(collisions_detected),
+                "teleports_detected": int(teleports_detected),
+                "seed": 42,
+                "step_length_sec": step_length,
             }
 
 

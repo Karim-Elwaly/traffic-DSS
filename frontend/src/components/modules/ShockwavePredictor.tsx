@@ -9,12 +9,11 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { Zap, AlertOctagon, Timer, ShieldAlert, Sparkles, Sliders, Cpu, Activity, Flame, Gauge, Loader2, Play } from 'lucide-react';
+import { Zap, AlertOctagon, Timer, ShieldAlert, Sparkles, Sliders, Loader2 } from 'lucide-react';
 import { KpiCard } from '../common/KpiCard';
 import {
   ShockwaveResponse,
   predictShockwaveAPI,
-  launchSumoGuiAPI,
 } from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
 
@@ -30,7 +29,7 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
   const t = translations[language];
   const isAr = language === 'ar';
 
-  const [engineMode, setEngineMode] = useState<'analytical' | 'sumo'>('sumo');
+  const engineMode = 'analytical' as const;
   const [incidentType, setIncidentType] = useState<string>('COLLISION');
   const [blockedLanes, setBlockedLanes] = useState<number>(2);
   const [weavingIndex, setWeavingIndex] = useState<number>(0.45);
@@ -62,11 +61,11 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
 
   useEffect(() => {
     runPrediction();
-  }, [corridorId, incidentHour, incidentDay, incidentType, blockedLanes, weavingIndex, engineMode]);
+  }, [corridorId, incidentHour, incidentDay, incidentType, blockedLanes, weavingIndex]);
 
   return (
     <div className="space-y-6">
-      {/* Header with Engine Switcher */}
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
@@ -75,51 +74,6 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
             {loading && <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />}
           </h2>
           <p className="text-xs text-slate-400 mt-1">{t.sw_subtitle}</p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {engineMode === 'sumo' && (
-            <button
-              onClick={async () => {
-                try {
-                  await launchSumoGuiAPI('workzone');
-                } catch (e) {
-                  console.error(e);
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition shadow-md shadow-emerald-500/20"
-              title={isAr ? 'تشغيل واجهة SUMO المرئية على سطح المكتب' : 'Launch native desktop SUMO-GUI window'}
-            >
-              <Play className="w-3.5 h-3.5 fill-slate-950" />
-              <span>{isAr ? 'تشغيل SUMO-GUI ↗' : 'Launch SUMO-GUI ↗'}</span>
-            </button>
-          )}
-
-          {/* Engine Switcher */}
-          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-lg">
-            <button
-              onClick={() => setEngineMode('analytical')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                engineMode === 'analytical'
-                  ? 'bg-rose-500 text-slate-950 font-bold shadow-md shadow-rose-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5" />
-              {t.int_engine_analytical || (isAr ? 'التحليل الهيدروديناميكي (LWR)' : 'LWR Hydrodynamic')}
-            </button>
-            <button
-              onClick={() => setEngineMode('sumo')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                engineMode === 'sumo'
-                  ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              {t.int_engine_sumo || (isAr ? 'محاكاة SUMO TraCI المجهرية' : 'SUMO TraCI Digital Twin')}
-            </button>
-          </div>
         </div>
       </div>
 
@@ -263,96 +217,7 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
         </div>
       </div>
 
-      {/* SUMO TraCI Microscopic Shockwave Telemetry Card */}
-      {data?.sumo_metrics && engineMode === 'sumo' && (
-        <div className="bg-gradient-to-r from-slate-900 via-rose-950/20 to-slate-900 border border-rose-500/30 rounded-xl p-4 shadow-xl">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-rose-400" />
-                {isAr ? 'محاكاة SUMO TraCI المجهرية لموجات الصدمة والاحتكاك المروري' : 'SUMO TraCI Microscopic Incident Shockwave Simulation'}
-              </h3>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
-                {data.sumo_metrics.engine}
-              </span>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
-                {isAr ? `${data.sumo_metrics.simulated_vehicles_count} مركبة بمحاكاة TraCI` : `${data.sumo_metrics.simulated_vehicles_count} TraCI Vehs`}
-              </span>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Gauge className="w-3.5 h-3.5 text-rose-400" />
-                {isAr ? 'تصريف عنق الزجاجة' : 'Bottleneck Rate'}
-              </div>
-              <div className="text-base font-mono font-bold text-rose-400 mt-1">
-                {data.sumo_metrics.bottleneck_throughput_pce}
-                <span className="text-[10px] text-slate-500 ml-1">PCE/h</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Activity className="w-3.5 h-3.5 text-amber-400" />
-                {isAr ? 'أقصى طابور مجهري (Q95)' : 'TraCI Q95 Queue'}
-              </div>
-              <div className="text-base font-mono font-bold text-amber-400 mt-1">
-                {data.sumo_metrics.max_queue_m}
-                <span className="text-[10px] text-slate-500 ml-1">m</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Timer className="w-3.5 h-3.5 text-rose-300" />
-                {isAr ? 'متوسط التأخير الفعلي' : 'Avg Time Loss'}
-              </div>
-              <div className="text-base font-mono font-bold text-rose-300 mt-1">
-                {data.sumo_metrics.average_delay_sec}
-                <span className="text-[10px] text-slate-500 ml-1">s/veh</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Activity className="w-3.5 h-3.5 text-emerald-400" />
-                {isAr ? 'متوسط سرعة المرور' : 'Mean Speed'}
-              </div>
-              <div className="text-base font-mono font-bold text-emerald-400 mt-1">
-                {data.sumo_metrics.average_speed_kmh}
-                <span className="text-[10px] text-slate-500 ml-1">km/h</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <AlertOctagon className="w-3.5 h-3.5 text-amber-300" />
-                {isAr ? 'مؤشر اضطراب الحارات' : 'Weaving Friction'}
-              </div>
-              <div className="text-base font-mono font-bold text-amber-300 mt-1">
-                {data.sumo_metrics.weaving_turbulence_index}
-                <span className="text-[10px] text-slate-500 ml-1">LC2013</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Flame className="w-3.5 h-3.5 text-rose-400" />
-                {isAr ? 'انبعاثات CO2 المحاكاة' : 'CO2 Emissions'}
-              </div>
-              <div className="text-base font-mono font-bold text-slate-200 mt-1">
-                {data.sumo_metrics.co2_emissions_kg_h}
-                <span className="text-[10px] text-slate-500 ml-1">kg/h</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Critical Tactical Gauge Cards */}
       {data && (

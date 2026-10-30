@@ -20,6 +20,30 @@ EGYPTIAN_VTYPES_XML = """
     <vType id="veh_motorcycle" vClass="motorcycle" length="2.20" width="0.85" maxSpeed="28.00" accel="3.50" decel="5.50" sigma="0.60" minGap="1.00" color="168,85,247" emissionClass="HBEFA3/PC_G_EU2"/>
 """
 
+# Passenger-car-equivalent factors used by Egyptian capacity analysis. The
+# work-zone API demand is expressed in PCE/h, so it must be divided by the
+# fleet's weighted PCE before it can be inserted as physical SUMO vehicles.
+VEHICLE_PCE: Dict[str, float] = {
+    "veh_car": 1.0,
+    "veh_microbus": 1.5,
+    "veh_bus": 2.5,
+    "veh_truck": 3.0,
+    "veh_motorcycle": 0.5,
+}
+
+
+def average_pce(heavy_pct: float) -> float:
+    """Capacity-weighted mean PCE of the generated Egyptian fleet."""
+    distribution = get_vehicle_type_distribution(heavy_pct)
+    total_prob = sum(prob for _, prob in distribution) or 1.0
+    return sum(VEHICLE_PCE.get(vtype, 1.0) * prob for vtype, prob in distribution) / total_prob
+
+
+def pce_to_vehicle_flow(demand_pce: float, heavy_pct: float) -> float:
+    """Convert a PCE/h demand into a physical vehicle/h insertion rate."""
+    return demand_pce / max(0.6, average_pce(heavy_pct))
+
+
 
 def get_vehicle_type_distribution(heavy_pct: float) -> List[tuple]:
     """
@@ -175,11 +199,16 @@ def generate_workzone_demand_xml(
     seed: int = 42,
 ) -> str:
     """
-    Generates dynamic vehicle demand for 4-lane highway workzone corridor.
+    Generates dynamic vehicle demand for a 4-lane highway work-zone corridor.
+
+    ``demand_pce`` is a passenger-car-equivalent flow. Vehicles are inserted at
+    the physical rate obtained by dividing by the fleet's weighted PCE, so a
+    truck consumes three times the bottleneck capacity of a car just as it does
+    in the HCM/analytical engine.
     """
     rng = random.Random(seed)
     dist = get_vehicle_type_distribution(heavy_pct)
-    rate_per_sec = (demand_pce / 3600.0)
+    physical_rate_per_sec = pce_to_vehicle_flow(demand_pce, heavy_pct) / 3600.0
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -190,7 +219,7 @@ def generate_workzone_demand_xml(
 
     veh_counter = 1
     for t in range(0, duration_sec):
-        rem = rate_per_sec
+        rem = physical_rate_per_sec
         while rem > 0:
             if rng.random() < min(1.0, rem):
                 vtype = pick_vtype(dist, rng)

@@ -273,9 +273,13 @@ const handleToggleLanguage = () => {
 
 ### 6.3 60fps Microscopic Canvas Rendering Pipeline
 Both simulation canvases ([HighwayCanvas.tsx](file:///d:/projects/traffic_dss/frontend/src/components/simulation/HighwayCanvas.tsx) and [IntersectionCanvas.tsx](file:///d:/projects/traffic_dss/frontend/src/components/simulation/IntersectionCanvas.tsx)) maintain internal 60fps `requestAnimationFrame` loops completely decoupled from React's virtual DOM reconciliation.
-- **Particle System:** Maintains an in-memory array of active vehicle particles (position, velocity, lane, vehicle class, braking state).
+- **Deterministic Demand:** A seeded PRNG drives Poisson arrivals, so the same slider inputs reproduce the same run while flow, heavy share and turning share still change the realized traffic.
+- **Vehicle Classes & PCE:** Egyptian passenger-car-equivalent classes (car, 14-seat microbus, bus, truck) are sampled from the heavy-vehicle share and drawn at their physical lengths.
+- **Car-Following:** The Intelligent Driver Model (IDM) integrates acceleration, braking and safe gaps; a front-to-rear lane safety pass prevents bumper overlap and reversed ordering.
+- **Signal Control:** `IntersectionCanvas` derives Webster cycle/splits from the measured demand, runs green/yellow/all-red phases, and applies right-turn-on-red only after a yield and a clear receiving lane.
+- **Geometry:** Right-turn arcs start exactly at each stop line and end in the receiving lane (outer lane for cars, inner lane for heavy vehicles); U-Turn traffic uses the protected median opening.
 - **Asphalt & Markings:** Rendered on HTML5 2D canvas with dashed lane dividers, jersey barriers, and warning cones.
-- **Dynamic Physics Integration:** Canvas vehicle densities, speeds, and queues dynamically scale with the user's slider inputs and calculated engine results.
+- **Measured Telemetry:** Flow, queue, delay, speed, and lane-change KPIs are computed from the simulated vehicles and completed trips; no fallback numbers are fabricated.
 
 ---
 
@@ -315,6 +319,8 @@ Both simulation canvases ([HighwayCanvas.tsx](file:///d:/projects/traffic_dss/fr
 
 8. `POST /api/cv/ingest`
    - **Description:** Ingests live edge YOLO + ByteTrack counts and updates active corridor state.
+
+> **SUMO UI policy:** Eclipse SUMO/TraCI remains a backend capability for validation, testing and API consumers. The frontend intentionally exposes no SUMO engine switch, status pill, or diagnostics modal; the live canvases use the deterministic browser-side microsimulation described in §6.3.
 
 9. `GET /api/dss/sumo/status`
    - **Description:** Reports native SUMO/TraCI availability, binary paths, `SUMO_HOME`, and generated network files.

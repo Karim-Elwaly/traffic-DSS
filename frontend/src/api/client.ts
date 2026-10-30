@@ -107,6 +107,15 @@ export interface SumoWorkZoneMetrics {
   weaving_turbulence_index: number;
   co2_emissions_kg_h: number;
   fuel_consumption_l_h: number;
+  heavy_vehicle_pct?: number;
+  pce_per_vehicle?: number;
+  demand_pce?: number;
+  queue_vehicles_95th?: number;
+  collisions_detected?: number;
+  teleports_detected?: number;
+  warmup_sec?: number;
+  measurement_sec?: number;
+  seed?: number;
 }
 
 export interface WorkZoneResponse {

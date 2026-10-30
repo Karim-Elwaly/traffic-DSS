@@ -1,8 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, RefreshCw, Eye } from 'lucide-react';
+import { Play, Pause, RefreshCw, Eye, Activity, Gauge } from 'lucide-react';
+import {
+  VehicleClassSpec,
+  averagePce,
+  exponential,
+  idmAcceleration,
+  makeRng,
+  pceToVehicleFlow,
+  pickColor,
+  sampleVehicleClass,
+} from '../../simulation/microsim';
 
 interface HighwayCanvasProps {
-  closedLanes: number[]; // 1 to 4
+  closedLanes: number[]; // 1 = rightmost/slow lane ... 4 = leftmost/fast lane
   speedLimitKmh: number;
   demandPce: number;
   capacityPce: number;
@@ -10,20 +20,58 @@ interface HighwayCanvasProps {
   language?: 'en' | 'ar';
   engineMode?: 'analytical' | 'sumo';
   isSumoNative?: boolean;
+  heavyPct?: number;
 }
 
 interface Vehicle {
   id: number;
-  x: number;
+  xM: number;
   lane: number;
-  targetLane: number;
+  laneVisual: number;
   speed: number;
-  type: 'car' | 'microbus' | 'bus' | 'truck';
-  length: number;
-  width: number;
+  spec: VehicleClassSpec;
   color: string;
-  isBraking: boolean;
+  lengthM: number;
+  widthPx: number;
+  departTime: number;
+  braking: boolean;
+  mergeCooldown: number;
+  laneChanges: number;
 }
+
+interface LiveStats {
+  throughputPce: number;
+  queueM: number;
+  avgDelaySec: number;
+  avgSpeedKmh: number;
+  active: number;
+  completed: number;
+  laneChanges: number;
+  avgPce: number;
+}
+
+// ---------------------------------------------------------------------------
+// World geometry: 300 m of 4-lane arterial mapped onto an 800 px canvas.
+// ---------------------------------------------------------------------------
+const W = 800;
+const H = 205;
+const NETWORK_M = 300;
+const PX_PER_M = W / NETWORK_M; // 2.667 px / m
+const ROAD_TOP = 30;
+const LANE_H = 36;
+const TAPER_START_M = 130;
+const TAPER_END_M = 165;
+const ENTRY_M = -5;
+const EXIT_M = NETWORK_M + 8;
+const MAX_UPSTREAM_STORAGE_M = 180;
+const WORK_ZONE_SPEED_KMH = 60;
+const UPDATE_HZ = 5;
+
+const laneCenterY = (lane: number) =>
+  ROAD_TOP + (4 - lane) * LANE_H + LANE_H / 2;
+
+const laneCenterOf = (laneVisual: number) =>
+  ROAD_TOP + (4 - laneVisual) * LANE_H + LANE_H / 2;
 
 export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   closedLanes,
@@ -34,66 +82,36 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   language = 'en',
   engineMode = 'analytical',
   isSumoNative = false,
+  heavyPct = 12,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
-  const [simSpeed, setSimSpeed] = useState(1);
+  const [simSpeed, setSimSpeed] = useState<1 | 2>(1);
+  const [resetToken, setResetToken] = useState(0);
+  const [live, setLive] = useState<LiveStats>({
+    throughputPce: 0,
+    queueM: 0,
+    avgDelaySec: 0,
+    avgSpeedKmh: 0,
+    active: 0,
+    completed: 0,
+    laneChanges: 0,
+    avgPce: averagePce(heavyPct),
+  });
+
+  const isPlayingRef = useRef(true);
+  const simSpeedRef = useRef<1 | 2>(1);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  useEffect(() => {
+    simSpeedRef.current = simSpeed;
+  }, [simSpeed]);
+
   const vehiclesRef = useRef<Vehicle[]>([]);
   const nextIdRef = useRef(1);
   const animationFrameIdRef = useRef<number | null>(null);
-
-  // Vehicle type profiles
-  const VEHICLE_TYPES = [
-    { type: 'car' as const, length: 18, width: 8, color: '#06b6d4', prob: 0.55 },
-    { type: 'microbus' as const, length: 22, width: 9, color: '#f59e0b', prob: 0.25 },
-    { type: 'bus' as const, length: 38, width: 10, color: '#10b981', prob: 0.08 },
-    { type: 'truck' as const, length: 44, width: 11, color: '#f43f5e', prob: 0.12 },
-  ];
-
-  const spawnVehicle = (canvasWidth: number) => {
-    // Pick lane based on open lanes and vehicle type
-    const r = Math.random();
-    let selectedType = VEHICLE_TYPES[0];
-    let cumulative = 0;
-    for (const vt of VEHICLE_TYPES) {
-      cumulative += vt.prob;
-      if (r <= cumulative) {
-        selectedType = vt;
-        break;
-      }
-    }
-
-    // Heavy vehicles favor right lanes (1 & 2)
-    let candidateLane: number;
-    if (selectedType.type === 'truck') {
-      candidateLane = Math.random() < 0.7 ? 1 : 2;
-    } else if (selectedType.type === 'car') {
-      candidateLane = Math.random() < 0.6 ? 4 : 3;
-    } else {
-      candidateLane = Math.floor(Math.random() * 4) + 1;
-    }
-
-    // Check if spawn position is clear
-    const laneY = candidateLane;
-    const isOccupied = vehiclesRef.current.some(
-      (v) => v.lane === laneY && v.x < 60
-    );
-
-    if (!isOccupied) {
-      vehiclesRef.current.push({
-        id: nextIdRef.current++,
-        x: -40,
-        lane: candidateLane,
-        targetLane: candidateLane,
-        speed: (speedLimitKmh / 35.0) * (0.85 + Math.random() * 0.3),
-        type: selectedType.type,
-        length: selectedType.length,
-        width: selectedType.width,
-        color: selectedType.color,
-        isBraking: false,
-      });
-    }
-  };
+  const completedRef = useRef<Array<{ time: number; pce: number; delay: number }>>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -101,216 +119,448 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let lastSpawnTime = performance.now();
+    const rng = makeRng(0x5eed + closedLanes.reduce((a, b) => a + b * 17, 0));
+    const avgPce = averagePce(heavyPct);
+    const vehPerSec = pceToVehicleFlow(demandPce, heavyPct) / 3600;
+    const meanInterArrival = vehPerSec > 0 ? 1 / vehPerSec : 1e9;
 
-    const render = (time: number) => {
-      // Auto spawn based on demandPce
-      const spawnInterval = Math.max(120, (3600.0 / Math.max(500, demandPce)) * 50);
-      if (time - lastSpawnTime > spawnInterval) {
-        spawnVehicle(canvas.width);
-        lastSpawnTime = time;
+    let simClock = 0;
+    let nextArrival = exponential(rng, meanInterArrival);
+    let lastTime = performance.now();
+    let lastStatsAt = 0;
+
+    const isOpen = (lane: number) => !closedLanes.includes(lane);
+
+    const laneVehicles = (lane: number) =>
+      vehiclesRef.current.filter((v) => v.lane === lane);
+
+    const gapToLeader = (veh: Vehicle) => {
+      let gap = Infinity;
+      let leaderSpeed = veh.speed;
+      for (const other of vehiclesRef.current) {
+        if (other.id === veh.id || other.lane !== veh.lane) continue;
+        if (other.xM > veh.xM) {
+          const g = other.xM - veh.xM - (veh.lengthM + other.lengthM) / 2;
+          if (g < gap) {
+            gap = g;
+            leaderSpeed = other.speed;
+          }
+        }
+      }
+      return { gap, leaderSpeed };
+    };
+
+    const laneGapForInsertion = (lane: number, x: number, lengthM: number) => {
+      let rear = -Infinity;
+      let front = Infinity;
+      for (const v of vehiclesRef.current) {
+        if (v.lane !== lane) continue;
+        if (v.xM < x) rear = Math.max(rear, v.xM + v.lengthM / 2);
+        else front = Math.min(front, v.xM - v.lengthM / 2);
+      }
+      return {
+        behind: rear === -Infinity ? Infinity : x - lengthM / 2 - rear,
+        ahead: front === Infinity ? Infinity : front - (x + lengthM / 2),
+      };
+    };
+
+    const chooseLane = (spec: VehicleClassSpec): number => {
+      // Vehicles are allowed to enter a lane that closes at the taper: this is
+      // what produces the observed mandatory-merge and queue behaviour instead
+      // of silently removing demand from the closed lane.
+      const allLanes = [1, 2, 3, 4];
+      const open = allLanes.filter(isOpen);
+      if (open.length === 0) return 1;
+      let preferred: number[];
+      if (spec.kind === 'truck' || spec.kind === 'bus') {
+        preferred = allLanes.filter((l) => l <= 2);
+      } else if (spec.kind === 'car') {
+        preferred = allLanes.filter((l) => l >= 3);
+      } else {
+        preferred = allLanes;
+      }
+      return preferred[Math.min(preferred.length - 1, Math.floor(rng() * preferred.length))];
+    };
+
+    const insertVehicle = () => {
+      const spec = sampleVehicleClass(rng, heavyPct);
+      const lane = chooseLane(spec);
+      const tailVehs = laneVehicles(lane).sort((a, b) => a.xM - b.xM);
+      const tail = tailVehs[0];
+      let x = ENTRY_M;
+      if (tail) {
+        x = tail.xM - (tail.lengthM / 2 + spec.minGapM + 1.5 + spec.lengthM / 2);
+      }
+      if (x < -MAX_UPSTREAM_STORAGE_M) return; // upstream storage is full
+
+      const gaps = laneGapForInsertion(lane, x, spec.lengthM);
+      if (gaps.behind < 1.2 || (Number.isFinite(gaps.ahead) && gaps.ahead < spec.minGapM)) {
+        return;
       }
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      vehiclesRef.current.push({
+        id: nextIdRef.current++,
+        xM: x,
+        lane,
+        laneVisual: lane,
+        speed: Math.min(speedLimitKmh, WORK_ZONE_SPEED_KMH) / 3.6,
+        spec,
+        color: pickColor(rng, spec),
+        lengthM: spec.lengthM,
+        widthPx: Math.max(7, spec.widthM * 3.4),
+        departTime: simClock,
+        braking: false,
+        mergeCooldown: 0,
+        laneChanges: 0,
+      });
+    };
 
-      const laneHeight = 36;
-      const roadTop = 30;
-      const roadBottom = roadTop + 4 * laneHeight;
-      const taperStartX = canvas.width * 0.45;
-      const workZoneStartX = canvas.width * 0.60;
-      const isCongested = demandPce > capacityPce;
+    const tryLaneChange = (veh: Vehicle, targetLane: number, now: number) => {
+      if (veh.mergeCooldown > 0 || targetLane === veh.lane) return;
+      if (!isOpen(targetLane)) return;
 
-      // 1. Draw Asphalt Road Bed
+      const distToClosure = TAPER_END_M - veh.xM;
+      const urgent = distToClosure < 55;
+      const requiredAhead = urgent ? 3.5 : 10 + veh.speed * 0.9;
+      const requiredBehind = urgent ? 2.5 : 6 + veh.speed * 0.4;
+
+      let aheadGap = Infinity;
+      let aheadSpeed = veh.speed;
+      let behindGap = Infinity;
+      let behindSpeed = 0;
+      for (const other of vehiclesRef.current) {
+        if (other.id === veh.id || other.lane !== targetLane) continue;
+        if (other.xM >= veh.xM) {
+          const g = other.xM - veh.xM - (veh.lengthM + other.lengthM) / 2;
+          if (g < aheadGap) {
+            aheadGap = g;
+            aheadSpeed = other.speed;
+          }
+        } else {
+          const g = veh.xM - other.xM - (veh.lengthM + other.lengthM) / 2;
+          if (g < behindGap) {
+            behindGap = g;
+            behindSpeed = other.speed;
+          }
+        }
+      }
+
+      const safe =
+        aheadGap >= requiredAhead &&
+        behindGap >= requiredBehind &&
+        behindSpeed <= veh.speed + 1.0;
+      if (!safe) return;
+
+      veh.lane = targetLane;
+      veh.mergeCooldown = 2.5;
+      veh.laneChanges += 1;
+      if (urgent) veh.braking = aheadGap < 12;
+      void now;
+    };
+
+    const step = (dtSim: number) => {
+      simClock += dtSim;
+
+      // Poisson arrivals
+      let guard = 0;
+      while (simClock >= nextArrival && guard < 20) {
+        insertVehicle();
+        nextArrival += exponential(rng, meanInterArrival);
+        guard += 1;
+      }
+
+      const wzSpeed = Math.min(speedLimitKmh, WORK_ZONE_SPEED_KMH) / 3.6;
+
+      for (const veh of vehiclesRef.current) {
+        veh.mergeCooldown = Math.max(0, veh.mergeCooldown - dtSim);
+
+        // Mandatory merge out of a closed lane inside the advance-warning
+        // zone. Before this point vehicles may legitimately still use the lane.
+        if (
+          !isOpen(veh.lane) &&
+          veh.xM > TAPER_START_M - 70 &&
+          veh.xM < TAPER_END_M
+        ) {
+          const candidates = [veh.lane - 1, veh.lane + 1, veh.lane - 2, veh.lane + 2]
+            .filter((l) => l >= 1 && l <= 4 && isOpen(l));
+          candidates.sort((a, b) => Math.abs(a - veh.lane) - Math.abs(b - veh.lane));
+          if (candidates.length > 0) {
+            tryLaneChange(veh, candidates[0], simClock);
+          }
+        } else if (veh.spec.kind === 'microbus' && weavingIndex > 0.35) {
+          // Egyptian microbus weaving, but only when a safe gap exists.
+          if (rng() < weavingIndex * 0.08 * dtSim) {
+            const target = veh.lane + (rng() < 0.5 ? -1 : 1);
+            if (target >= 1 && target <= 4) tryLaneChange(veh, target, simClock);
+          }
+        }
+
+        let desired = speedLimitKmh / 3.6;
+        if (veh.xM > TAPER_START_M - 45) desired = Math.min(desired, wzSpeed);
+        if (!isOpen(veh.lane)) desired = Math.min(desired, wzSpeed * 0.75);
+
+        let { gap, leaderSpeed } = gapToLeader(veh);
+
+        // A closed lane has a physical barrier at the taper nose.
+        if (!isOpen(veh.lane) && veh.xM < TAPER_END_M) {
+          const barrierGap = TAPER_END_M - 0.6 - veh.xM - veh.lengthM / 2;
+          if (barrierGap < gap) {
+            gap = barrierGap;
+            leaderSpeed = 0;
+          }
+          if (barrierGap < 30) desired = Math.min(desired, 4.0);
+        }
+
+        // Zipper-merge courtesy: slow slightly when a merging vehicle is alongside.
+        for (const other of vehiclesRef.current) {
+          if (other.id === veh.id) continue;
+          if (Math.abs(other.xM - veh.xM) < 9 && Math.abs(other.lane - veh.lane) === 1) {
+            if (!isOpen(other.lane)) desired = Math.min(desired, Math.max(veh.speed, 6.0));
+          }
+        }
+
+        const accel = idmAcceleration(
+          veh.speed,
+          Math.max(0, desired * veh.spec.speedFactor),
+          Math.max(0.1, gap),
+          leaderSpeed,
+          veh.spec
+        );
+        veh.speed = Math.max(0, veh.speed + accel * dtSim);
+        veh.xM += veh.speed * dtSim;
+        veh.braking = accel < -0.35 || (veh.speed < 1.0 && desired > 1.0);
+        veh.laneVisual += (veh.lane - veh.laneVisual) * Math.min(1, dtSim * 5.5);
+      }
+
+      // Hard safety pass: no bumper overlap inside a lane.
+      for (let lane = 1; lane <= 4; lane += 1) {
+        const list = vehiclesRef.current
+          .filter((v) => v.lane === lane)
+          .sort((a, b) => b.xM - a.xM);
+        for (let i = 0; i < list.length - 1; i += 1) {
+          const leader = list[i];
+          const follower = list[i + 1];
+          const minGap = (leader.lengthM + follower.lengthM) / 2 + follower.spec.minGapM * 0.6;
+          const gap = leader.xM - follower.xM;
+          if (gap < minGap) {
+            follower.xM = leader.xM - minGap;
+            follower.speed = Math.min(follower.speed, leader.speed);
+          }
+        }
+      }
+
+      // Record completed trips at the downstream boundary.
+      const remaining: Vehicle[] = [];
+      for (const veh of vehiclesRef.current) {
+        if (veh.xM > EXIT_M) {
+          const freeFlowTime = (NETWORK_M - ENTRY_M) / Math.max(8, speedLimitKmh / 3.6);
+          completedRef.current.push({
+            time: simClock,
+            pce: veh.spec.pce,
+            delay: Math.max(0, simClock - veh.departTime - freeFlowTime),
+          });
+        } else {
+          remaining.push(veh);
+        }
+      }
+      vehiclesRef.current = remaining;
+
+      const cutoff = simClock - 65;
+      completedRef.current = completedRef.current.filter((c) => c.time >= cutoff);
+    };
+
+    const computeStats = (): LiveStats => {
+      const windowSec = Math.max(5, Math.min(60, simClock));
+      const recent = completedRef.current.filter((c) => c.time >= simClock - 60);
+      const throughput = (recent.reduce((s, c) => s + c.pce, 0) * 3600) / windowSec;
+
+      let queueM = 0;
+      for (let lane = 1; lane <= 4; lane += 1) {
+        const queued = vehiclesRef.current.filter(
+          (v) => v.lane === lane && v.speed < 1.0 && v.xM < TAPER_END_M
+        );
+        if (queued.length > 0) {
+          const back = TAPER_END_M - Math.min(...queued.map((v) => v.xM - v.lengthM / 2));
+          queueM = Math.max(queueM, back);
+        }
+      }
+
+      const allCompleted = completedRef.current;
+      const avgDelay =
+        allCompleted.length > 0
+          ? allCompleted.reduce((s, c) => s + c.delay, 0) / allCompleted.length
+          : 0;
+      const avgSpeed =
+        vehiclesRef.current.length > 0
+          ? (vehiclesRef.current.reduce((s, v) => s + v.speed, 0) /
+              vehiclesRef.current.length) *
+            3.6
+          : 0;
+
+      return {
+        throughputPce: Math.round(throughput),
+        queueM: Math.round(queueM * 10) / 10,
+        avgDelaySec: Math.round(avgDelay * 10) / 10,
+        avgSpeedKmh: Math.round(avgSpeed * 10) / 10,
+        active: vehiclesRef.current.length,
+        completed: allCompleted.length,
+        laneChanges: vehiclesRef.current.reduce((s, v) => s + v.laneChanges, 0),
+        avgPce: Math.round(avgPce * 100) / 100,
+      };
+    };
+
+    const render = (time: number) => {
+      const dtReal = Math.min((time - lastTime) / 1000, 0.1);
+      lastTime = time;
+
+      if (isPlayingRef.current) {
+        // Fixed 30 Hz physics sub-steps keep IDM stable at 1x and 2x speed.
+        const dtSimTotal = dtReal * simSpeedRef.current;
+        const subSteps = Math.max(1, Math.ceil(dtSimTotal / (1 / 30)));
+        const dtSub = dtSimTotal / subSteps;
+        for (let s = 0; s < subSteps; s += 1) step(dtSub);
+      }
+
+      if (time - lastStatsAt > 1000 / UPDATE_HZ) {
+        lastStatsAt = time;
+        setLive(computeStats());
+      }
+
+      // ---------------------------------------------------------------------
+      // Draw road, closure taper, work zone and vehicles.
+      // ---------------------------------------------------------------------
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#060a12';
+      ctx.fillRect(0, 0, W, H);
+
+      const roadBottom = ROAD_TOP + 4 * LANE_H;
       ctx.fillStyle = '#0b0f19';
-      ctx.fillRect(0, roadTop, canvas.width, 4 * laneHeight);
+      ctx.fillRect(0, ROAD_TOP, W, 4 * LANE_H);
 
-      // Top and bottom solid road shoulders (yellow / white)
+      // Shoulders
       ctx.strokeStyle = '#e2e8f0';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(0, roadTop);
-      ctx.lineTo(canvas.width, roadTop);
+      ctx.moveTo(0, ROAD_TOP);
+      ctx.lineTo(W, ROAD_TOP);
       ctx.moveTo(0, roadBottom);
-      ctx.lineTo(canvas.width, roadBottom);
+      ctx.lineTo(W, roadBottom);
       ctx.stroke();
 
-      // 2. Draw Lane Dividers (Dashed)
+      // Lane dividers
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([12, 10]);
-
-      for (let i = 1; i < 4; i++) {
-        const y = roadTop + i * laneHeight;
+      for (let i = 1; i < 4; i += 1) {
+        const y = ROAD_TOP + i * LANE_H;
         ctx.beginPath();
         ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
+        ctx.lineTo(W, y);
         ctx.stroke();
       }
-      ctx.setLineDash([]); // Reset dash
+      ctx.setLineDash([]);
 
-      // 3. Draw Lane Labels (Lane 4 Top, Lane 1 Bottom)
+      // Lane labels (Lane 4 is the fast/top lane, Lane 1 the slow/bottom lane)
       ctx.font = '10px JetBrains Mono, monospace';
-      ctx.fillStyle = '#64748b';
-      for (let i = 1; i <= 4; i++) {
-        const laneIdxFromTop = 4 - i; // Lane 4 is top (0), Lane 1 is bottom (3)
-        const y = roadTop + laneIdxFromTop * laneHeight + laneHeight / 2 + 3;
-        ctx.fillText(`L${i}`, 8, y);
+      for (let lane = 1; lane <= 4; lane += 1) {
+        const y = laneCenterY(lane) + 3;
+        const closed = !isOpen(lane);
+        ctx.fillStyle = closed ? '#ef4444' : '#64748b';
+        ctx.fillText(`L${lane}${closed ? ' ✕' : ''}`, 8, y);
       }
 
-      // 4. Draw Closed Lanes Work-Zone & Taper Cones
-      closedLanes.forEach((closedLane) => {
-        const laneIdxFromTop = 4 - closedLane;
-        const yTop = roadTop + laneIdxFromTop * laneHeight;
+      const taperStartX = TAPER_START_M * PX_PER_M;
+      const taperEndX = TAPER_END_M * PX_PER_M;
 
-        // Work zone hazard hatching
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
-        ctx.fillRect(workZoneStartX, yTop, canvas.width - workZoneStartX, laneHeight);
-
-        // Safety Barrier stripes
+      // Work-zone carpet on closed lanes
+      for (const lane of closedLanes) {
+        const laneTop = ROAD_TOP + (4 - lane) * LANE_H;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+        ctx.fillRect(taperStartX, laneTop, W - taperStartX, LANE_H);
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(workZoneStartX, yTop + laneHeight / 2);
-        ctx.lineTo(canvas.width, yTop + laneHeight / 2);
+        ctx.moveTo(taperStartX, laneTop + LANE_H / 2);
+        ctx.lineTo(W, laneTop + LANE_H / 2);
         ctx.stroke();
 
-        // Warning Taper zone (yellow/orange cones diagonal)
-        const taperSteps = 8;
-        for (let s = 0; s <= taperSteps; s++) {
-          const coneX = taperStartX + s * ((workZoneStartX - taperStartX) / taperSteps);
-          const coneY = yTop + (s / taperSteps) * (laneHeight * 0.8) + 4;
-
-          // Draw reflective cone
+        // Cones along the taper
+        const steps = 10;
+        for (let s = 0; s <= steps; s += 1) {
+          const coneX = taperStartX + (s / steps) * (taperEndX - taperStartX);
+          const coneY =
+            laneTop + LANE_H * 0.82 - (s / steps) * (LANE_H * 0.62);
           ctx.fillStyle = '#f97316';
           ctx.beginPath();
-          ctx.arc(coneX, coneY, 3.5, 0, Math.PI * 2);
+          ctx.arc(coneX, coneY, 3.4, 0, Math.PI * 2);
           ctx.fill();
-
           ctx.fillStyle = '#ffffff';
           ctx.beginPath();
-          ctx.arc(coneX, coneY, 1.5, 0, Math.PI * 2);
+          ctx.arc(coneX, coneY, 1.4, 0, Math.PI * 2);
           ctx.fill();
         }
-      });
-
-      // 5. Update & Draw Vehicles
-      if (isPlaying) {
-        const vehicles = vehiclesRef.current;
-        for (let i = 0; i < vehicles.length; i++) {
-          const v = vehicles[i];
-
-          // Check if ahead vehicle is too close in the same lane
-          let leadDistance = 999;
-          for (let j = 0; j < vehicles.length; j++) {
-            if (i !== j && vehicles[j].lane === v.lane && vehicles[j].x > v.x) {
-              const dist = vehicles[j].x - (v.x + v.length);
-              if (dist < leadDistance) {
-                leadDistance = dist;
-              }
-            }
-          }
-
-          // Check if upcoming lane is closed and trigger merging
-          const isCurrentLaneClosed = closedLanes.includes(v.lane);
-          const approachingWorkZone = v.x > taperStartX - 100 && v.x < workZoneStartX;
-
-          if (isCurrentLaneClosed && approachingWorkZone && v.lane === v.targetLane) {
-            // Find an open lane
-            const availableOpenLanes = [1, 2, 3, 4].filter((l) => !closedLanes.includes(l));
-            if (availableOpenLanes.length > 0) {
-              // Pick closest open lane
-              availableOpenLanes.sort((a, b) => Math.abs(a - v.lane) - Math.abs(b - v.lane));
-              v.targetLane = availableOpenLanes[0];
-            }
-          }
-
-          // Random microbus weaving if weavingIndex is high
-          if (v.type === 'microbus' && Math.random() < weavingIndex * 0.015 && v.lane === v.targetLane) {
-            const delta = Math.random() < 0.5 ? -1 : 1;
-            const newL = v.lane + delta;
-            if (newL >= 1 && newL <= 4 && !closedLanes.includes(newL)) {
-              v.targetLane = newL;
-            }
-          }
-
-          // Smooth lane transition
-          if (v.lane !== v.targetLane) {
-            const laneDiff = v.targetLane - v.lane;
-            v.lane += Math.sign(laneDiff) * 0.05 * simSpeed;
-            if (Math.abs(v.targetLane - v.lane) < 0.06) {
-              v.lane = v.targetLane;
-            }
-          }
-
-          // Physics speed adjustments
-          let targetSpeed = (speedLimitKmh / 35.0) * simSpeed;
-
-          // Congestion deceleration
-          if (isCongested && v.x > taperStartX - 80) {
-            targetSpeed *= Math.max(0.25, capacityPce / demandPce);
-          }
-
-          // Car-following model
-          if (leadDistance < 35) {
-            v.isBraking = true;
-            targetSpeed = Math.min(targetSpeed, leadDistance * 0.08);
-          } else {
-            v.isBraking = false;
-          }
-
-          v.speed += (targetSpeed - v.speed) * 0.1;
-          v.x += Math.max(0.4, v.speed);
-        }
-
-        // Remove vehicles off-screen
-        vehiclesRef.current = vehicles.filter((v) => v.x < canvas.width + 50);
       }
 
-      // Draw all vehicles
-      vehiclesRef.current.forEach((v) => {
-        const laneIdxFromTop = 4 - v.lane;
-        const centerY = roadTop + laneIdxFromTop * laneHeight + laneHeight / 2;
+      // Work-zone speed sign
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(taperStartX + 8, ROAD_TOP - 28, 62, 21, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 11px JetBrains Mono, monospace';
+      ctx.fillText(`${WORK_ZONE_SPEED_KMH} km/h`, taperStartX + 13, ROAD_TOP - 13);
+
+      // Vehicles
+      for (const v of vehiclesRef.current) {
+        const xPx = v.xM * PX_PER_M;
+        if (xPx < -60 || xPx > W + 60) continue;
+        const y = laneCenterOf(v.laneVisual);
+        const lengthPx = Math.max(11, v.lengthM * PX_PER_M * 1.35);
+        const widthPx = v.widthPx;
 
         ctx.save();
-        ctx.translate(v.x, centerY);
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-        ctx.fillRect(-v.length / 2 + 2, -v.width / 2 + 2, v.length, v.width);
-
-        // Body
+        ctx.translate(xPx, y);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(-lengthPx / 2 + 2, -widthPx / 2 + 2, lengthPx, widthPx);
         ctx.fillStyle = v.color;
         ctx.beginPath();
-        ctx.roundRect(-v.length / 2, -v.width / 2, v.length, v.width, 2.5);
+        ctx.roundRect(-lengthPx / 2, -widthPx / 2, lengthPx, widthPx, 2.5);
         ctx.fill();
-
-        // Windshield
         ctx.fillStyle = '#0f172a';
-        ctx.fillRect(v.length * 0.05, -v.width * 0.35, v.length * 0.22, v.width * 0.7);
-
-        // Headlights (cyan / white)
+        ctx.fillRect(lengthPx * 0.04, -widthPx * 0.35, lengthPx * 0.2, widthPx * 0.7);
         ctx.fillStyle = '#f8fafc';
-        ctx.fillRect(v.length / 2 - 2, -v.width / 2 + 1, 2, 2);
-        ctx.fillRect(v.length / 2 - 2, v.width / 2 - 3, 2, 2);
-
-        // Brake lights (red glow when braking)
-        if (v.isBraking) {
+        ctx.fillRect(lengthPx / 2 - 2, -widthPx / 2 + 1, 2, 2);
+        ctx.fillRect(lengthPx / 2 - 2, widthPx / 2 - 3, 2, 2);
+        if (v.braking) {
           ctx.fillStyle = '#ef4444';
           ctx.shadowColor = '#ef4444';
           ctx.shadowBlur = 6;
-          ctx.fillRect(-v.length / 2, -v.width / 2 + 1, 2, 2);
-          ctx.fillRect(-v.length / 2, v.width / 2 - 3, 2, 2);
+          ctx.fillRect(-lengthPx / 2, -widthPx / 2 + 1, 2, 2);
+          ctx.fillRect(-lengthPx / 2, widthPx / 2 - 3, 2, 2);
         }
-
+        // Amber turn signal while merging
+        if (!isOpen(v.lane) || v.mergeCooldown > 2.2) {
+          ctx.fillStyle = '#f59e0b';
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 5;
+          ctx.fillRect(lengthPx / 2 - 2, -widthPx / 2 + 1, 2, 2.5);
+        }
         ctx.restore();
-      });
+      }
 
-      // 6. Draw Shockwave Backpressure Queue Indicator
-      if (isCongested) {
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+      // Queue and backpressure overlay
+      const liveNow = computeStats();
+      if (liveNow.queueM > 30) {
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
         ctx.font = 'bold 11px Inter, Cairo, sans-serif';
-        const txt = language === 'ar' ? '⚠️ ارتداد موجة تكدس (Shockwave)' : '⚠️ Incident Shockwave Queue Active';
-        ctx.fillText(txt, Math.max(20, taperStartX - 190), roadTop - 8);
+        const txt =
+          language === 'ar'
+            ? `⚠ ارتداد طابور ${Math.round(liveNow.queueM)} م — دمج إجباري`
+            : `⚠ ${Math.round(liveNow.queueM)} m queue — mandatory merge`;
+        ctx.fillText(txt, Math.max(16, taperEndX - 210), ROAD_TOP - 10);
       }
 
       animationFrameIdRef.current = requestAnimationFrame(render);
@@ -319,11 +569,11 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     animationFrameIdRef.current = requestAnimationFrame(render);
 
     return () => {
-      if (animationFrameIdRef.current) {
-        cancelAnimationFrame(animationFrameIdRef.current);
-      }
+      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [closedLanes, speedLimitKmh, demandPce, capacityPce, weavingIndex, isPlaying, simSpeed, language]);
+  }, [closedLanes, speedLimitKmh, demandPce, weavingIndex, language, heavyPct, resetToken]);
+
+  const measuredVc = capacityPce > 0 ? live.throughputPce / capacityPce : 0;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
@@ -332,18 +582,11 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           <Eye className="w-5 h-5 text-cyan-400" />
           <h4 className="text-sm font-semibold text-slate-100">
             {language === 'ar'
-              ? 'المحاكي الميكروسكوبي الحي للطريق السريع (60 إطار/ثانية)'
-              : 'Live 60fps Microscopic 4-Lane Highway Simulator'}
+              ? 'المحاكي الميكروسكوبي الحي (IDM + دمج إجباري عند منطقة العمل)'
+              : 'Live Microscopic Simulator (IDM + mandatory work-zone merge)'}
           </h4>
-          {engineMode === 'sumo' && (
-            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              {isSumoNative ? 'SUMO TraCI Native' : 'SUMO TraCI Twin'}
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Vehicle Class Legend */}
           <div className="hidden sm:flex items-center gap-3 text-xs text-slate-400 bg-slate-950/70 px-3 py-1 rounded-lg border border-slate-800">
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> Car
@@ -369,6 +612,8 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           <button
             onClick={() => {
               vehiclesRef.current = [];
+              completedRef.current = [];
+              setResetToken((t) => t + 1);
             }}
             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition"
             title="Reset Canvas"
@@ -381,23 +626,58 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       <div className="relative rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
         <canvas
           ref={canvasRef}
-          width={800}
-          height={205}
+          width={W}
+          height={H}
           className="w-full h-auto block"
         />
       </div>
 
-      <div className="flex items-center justify-between mt-2.5 text-xs text-slate-400">
+      {/* Live measured telemetry (not the analytical answer) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-[11px] font-mono">
+        <div className="bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-2">
+          <span className="text-slate-500 flex items-center gap-1">
+            <Activity className="w-3 h-3" /> {language === 'ar' ? 'التدفق المقاس' : 'Measured flow'}
+          </span>
+          <span className="text-cyan-300 font-bold">
+            {live.throughputPce.toLocaleString()} PCE/h
+          </span>
+          <span className="text-slate-500"> (v/c {measuredVc.toFixed(2)})</span>
+        </div>
+        <div className="bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-2">
+          <span className="text-slate-500">{language === 'ar' ? 'الطابور الأقصى' : 'Max queue'}</span>
+          <span className={live.queueM > 150 ? 'text-rose-400 font-bold' : 'text-amber-300 font-bold'}>
+            {live.queueM.toFixed(1)} m
+          </span>
+        </div>
+        <div className="bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-2">
+          <span className="text-slate-500">{language === 'ar' ? 'متوسط التأخير' : 'Avg delay'}</span>
+          <span className="text-rose-300 font-bold">{live.avgDelaySec.toFixed(1)} s/veh</span>
+        </div>
+        <div className="bg-slate-950/70 border border-slate-800 rounded-lg px-2.5 py-2">
+          <span className="text-slate-500 flex items-center gap-1">
+            <Gauge className="w-3 h-3" /> {language === 'ar' ? 'السرعة' : 'Mean speed'}
+          </span>
+          <span className="text-emerald-300 font-bold">{live.avgSpeedKmh.toFixed(1)} km/h</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between mt-2.5 gap-2 text-xs text-slate-400">
         <span>
-          {language === 'ar' ? 'حجم الطلب:' : 'Demand:'} <strong className="text-cyan-400">{demandPce}</strong> PCE/h |{' '}
-          {language === 'ar' ? 'السعة الفعالة:' : 'Capacity:'} <strong className="text-emerald-400">{capacityPce}</strong> PCE/h
+          {language === 'ar' ? 'الطلب:' : 'Demand:'} <strong className="text-cyan-400">{Math.round(demandPce).toLocaleString()}</strong> PCE/h
+          {' · '}
+          {language === 'ar' ? 'السعة:' : 'Capacity:'} <strong className="text-emerald-400">{Math.round(capacityPce).toLocaleString()}</strong> PCE/h
+          {' · '}
+          {language === 'ar' ? 'متوسط PCE:' : 'Avg PCE:'} <strong className="text-slate-300">{live.avgPce.toFixed(2)}</strong>
         </span>
         <div className="flex items-center gap-2">
-          <span>{language === 'ar' ? 'السرعة:' : 'Sim Speed:'}</span>
+          <span className="text-[10px] text-slate-500 font-mono">
+            {live.active} active · {live.completed} trips · {live.laneChanges} lane changes
+          </span>
+          <span>{language === 'ar' ? 'سرعة المحاكاة:' : 'Sim speed:'}</span>
           {[1, 2].map((s) => (
             <button
               key={s}
-              onClick={() => setSimSpeed(s)}
+              onClick={() => setSimSpeed(s as 1 | 2)}
               className={`px-2 py-0.5 rounded text-[11px] font-mono ${
                 simSpeed === s ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
               }`}

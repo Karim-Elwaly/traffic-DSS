@@ -1,8 +1,8 @@
+// Operations Top Command Bar (SUMO hidden)
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Globe, Activity, Clock, Gauge, Compass, Cpu } from 'lucide-react';
-import { CorridorSummary, getSumoStatusAPI, SumoSystemStatus } from '../../api/client';
+import { ShieldCheck, Globe, Activity, Clock, Gauge, Compass } from 'lucide-react';
+import { CorridorSummary } from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
-import { SumoStatusModal } from '../common/SumoStatusModal';
 
 interface TopCommandBarProps {
   corridors: CorridorSummary[];
@@ -21,18 +21,8 @@ export const TopCommandBar: React.FC<TopCommandBarProps> = ({
 }) => {
   const t = translations[language];
   const [timeStr, setTimeStr] = useState('');
-  const [sumoStatus, setSumoStatus] = useState<SumoSystemStatus | null>(null);
-  const [isSumoModalOpen, setIsSumoModalOpen] = useState(false);
 
   const activeCorridor = corridors.find((c) => c.id === selectedCorridorId) || corridors[0];
-
-  useEffect(() => {
-    getSumoStatusAPI().then(setSumoStatus);
-    const interval = setInterval(() => {
-      getSumoStatusAPI().then(setSumoStatus);
-    }, 15000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -68,23 +58,6 @@ export const TopCommandBar: React.FC<TopCommandBarProps> = ({
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 {t.operational_status}
               </span>
-              {/* SUMO Status Interactive Pill */}
-              <button
-                onClick={() => setIsSumoModalOpen(true)}
-                className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border transition shadow-sm ${
-                  sumoStatus?.sumo_available
-                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
-                    : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/25'
-                }`}
-                title="SUMO Microscopic Digital Twin Diagnostics"
-              >
-                <Cpu className="w-3 h-3 text-cyan-400" />
-                <span>
-                  {sumoStatus?.sumo_available
-                    ? t.sumo_badge_native
-                    : t.sumo_badge_emulation}
-                </span>
-              </button>
             </div>
             <p className="text-xs text-slate-400 hidden md:block">
               {t.system_subtitle}
@@ -136,13 +109,6 @@ export const TopCommandBar: React.FC<TopCommandBarProps> = ({
           </button>
         </div>
       </div>
-
-      {/* SUMO Digital Twin Diagnostics Modal */}
-      <SumoStatusModal
-        isOpen={isSumoModalOpen}
-        onClose={() => setIsSumoModalOpen(false)}
-        language={language}
-      />
     </header>
   );
 };

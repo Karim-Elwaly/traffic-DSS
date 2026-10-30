@@ -1,3 +1,4 @@
+// Intelligent Traffic DSS Main Application
 import React, { useState, useEffect } from 'react';
 import { TopCommandBar } from './components/layout/TopCommandBar';
 import { SidebarNav, ActiveModule } from './components/layout/SidebarNav';

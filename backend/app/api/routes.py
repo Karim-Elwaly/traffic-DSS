@@ -234,12 +234,18 @@ def optimize_workzone(
         )
         sim_demand = weekly_demands[selected_day][target_hr] if 0 <= target_hr < 24 else 2500.0
         duration = getattr(payload, "simulation_duration_sec", 60)
+        heavy_share = (
+            weekly_heavy_ratios[selected_day][target_hr] * 100.0
+            if 0 <= target_hr < 24
+            else 12.0
+        )
         try:
             wz_metrics = execute_traci_workzone_sim(
                 closed_lanes=payload.closed_lanes,
                 demand_pce=sim_demand,
                 speed_limit_kmh=corridor.speed_limit_kmh,
                 duration_sec=duration,
+                heavy_pct=heavy_share,
             )
             response.sumo_metrics = wz_metrics
         except Exception as err:
@@ -262,8 +268,18 @@ def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(
         .where(HourlyTelemetry.day_of_week == payload.day_of_week)
     ).all()
     hourly_pce: dict[int, float] = {h: 0.0 for h in range(24)}
+    hourly_vehicles: dict[int, float] = {h: 0.0 for h in range(24)}
+    hourly_heavy: dict[int, float] = {h: 0.0 for h in range(24)}
     for record in records:
         hourly_pce[record.hour] += record.pce_flow
+        hourly_vehicles[record.hour] += (
+            record.count_cars
+            + record.count_microbus
+            + record.count_buses
+            + record.count_trucks
+            + record.count_motorcycles
+        )
+        hourly_heavy[record.hour] += record.count_buses + record.count_trucks
 
     populated = {h: value for h, value in hourly_pce.items() if value > 0.0}
     if payload.target_start_hour is not None:
@@ -273,12 +289,18 @@ def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(
     else:
         target_hr = 8
     demand_pce = populated.get(target_hr, 4800.0)
+    heavy_pct = (
+        100.0 * hourly_heavy[target_hr] / hourly_vehicles[target_hr]
+        if hourly_vehicles[target_hr] > 0
+        else 12.0
+    )
 
     metrics = execute_traci_workzone_sim(
         closed_lanes=payload.closed_lanes,
         demand_pce=demand_pce,
         speed_limit_kmh=corridor.speed_limit_kmh,
         duration_sec=getattr(payload, "simulation_duration_sec", 60),
+        heavy_pct=heavy_pct,
     )
     metrics["demand_pce"] = round(demand_pce, 1)
     metrics["target_hour"] = target_hr

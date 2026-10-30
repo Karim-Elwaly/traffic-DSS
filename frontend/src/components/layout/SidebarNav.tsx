@@ -33,7 +33,6 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       icon: <Split className="w-5 h-5" />,
       accent: 'from-cyan-500 to-blue-600',
       activeColor: 'text-cyan-400',
-      badge: 'SUMO TraCI',
     },
     {
       id: 'shockwave' as const,
@@ -87,11 +86,6 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 <span className={`block text-xs font-bold truncate ${isActive ? item.activeColor : ''}`}>
                   {item.name}
                 </span>
-                {item.badge && (
-                  <span className="text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/40">
-                    {item.badge}
-                  </span>
-                )}
               </div>
               <span className="block text-[11px] text-slate-500 truncate hidden lg:block">
                 {item.desc}
