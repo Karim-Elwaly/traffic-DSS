@@ -33,6 +33,7 @@ interface IntersectionCanvasProps {
   language?: Language;
   turningPct?: number;
   heavyPct?: number;
+  uturnDistanceM?: number;
 }
 
 interface SimVehicle {
@@ -163,6 +164,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   language = 'en',
   turningPct = 18,
   heavyPct = 12,
+  uturnDistanceM = 450,
 }) => {
   const isAr = language === 'ar';
   const signalCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -731,7 +733,8 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           v.loopToY = v.lane === 1 ? 135 : 160;
         }
       } else if (v.stream === 'loop') {
-        const progress = (v.pathProgress ?? 0) + (v.speed / 300) * dt;
+        const detourScale = Math.max(0.4, Math.min(2.5, uturnDistanceM / 450));
+        const progress = (v.pathProgress ?? 0) + (v.speed / (300 * detourScale)) * dt;
         v.pathProgress = progress;
         if (progress >= 1) {
           v.stream = 'west';
@@ -1451,7 +1454,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
     animFrameRef.current = requestAnimationFrame(loop);
 
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [effectiveMainFlow, effectiveCrossFlow, turningPct, heavyPct, language, resetToken]);
+  }, [effectiveMainFlow, effectiveCrossFlow, turningPct, heavyPct, uturnDistanceM, language, resetToken]);
 
   const handleReset = () => {
     setResetToken((t) => t + 1);
@@ -1619,7 +1622,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
                 <span className="text-rose-400 font-bold">
                   {live.warmup
                     ? '—'
-                    : `${live.signalQueueVeh} ${isAr ? 'مركبة' : 'veh'} · ${live.signalQueueM} m`}
+                    : `${live.signalQueueVeh} ${isAr ? 'مركبة' : 'veh'} · ${Math.round(live.signalQueueM)} m`}
                 </span>
               </div>
             </div>
@@ -1635,7 +1638,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
               <span className="text-xs font-bold text-amber-400 font-mono">
-                {live.warmup ? '—' : `${live.signalQueueM} m`}
+                {live.warmup ? '—' : `${Math.round(live.signalQueueM)} m`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
@@ -1643,7 +1646,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
                 <Activity className="w-3 h-3" /> {isAr ? 'التدفق' : 'Throughput'}
               </span>
               <span className="text-xs font-bold text-cyan-400 font-mono">
-                {live.warmup ? '—' : `${live.signalThroughput.toLocaleString()} veh/h`}
+                {live.warmup ? '—' : `${Math.round(live.signalThroughput).toLocaleString()} veh/h`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
@@ -1680,8 +1683,9 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
               <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-emerald-500/50 shadow-sm animate-pulse" />
                 <span className="text-emerald-300 font-semibold">
-                  {isAr ? 'حركة حرة مستمرة (بدون إشارات توقف)' : 'Continuous Free Flow (0 Stop Lights)'}
+                  {isAr ? 'حركة حرة مستمرة' : 'Continuous Free Flow'}
                 </span>
+                <span className="text-emerald-400/90 text-[10px]">({uturnDistanceM}m {isAr ? 'مسافة دوران' : 'detour'})</span>
                 <span className="text-emerald-400 font-bold ml-1">{live.uturnWarmup ? '—' : `${live.uturnSpeed.toFixed(0)} km/h`}</span>
               </div>
               <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg text-slate-300">
@@ -1704,7 +1708,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
               <span className="text-xs font-bold text-emerald-400 font-mono">
-                {live.uturnWarmup ? '—' : `${live.uturnQueueM} m`}
+                {live.uturnWarmup ? '—' : `${Math.round(live.uturnQueueM)} m`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">

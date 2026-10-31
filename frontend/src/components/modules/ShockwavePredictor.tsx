@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { Zap, AlertOctagon, Timer, ShieldAlert, Sparkles, Sliders, Loader2 } from 'lucide-react';
 import { KpiCard } from '../common/KpiCard';
+import { HighwayCanvas } from '../simulation/HighwayCanvas';
 import {
   ShockwaveResponse,
   predictShockwaveAPI,
@@ -275,6 +276,35 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
             description={isAr ? `التدفق الواصل: ${data.arrival_flow_pce}` : `Arrival flow: ${data.arrival_flow_pce} PCE/h`}
           />
         </div>
+      )}
+
+      {/* Live Microscopic Highway Simulation of Incident Shockwave */}
+      {data && (
+        <HighwayCanvas
+          closedLanes={
+            blockedLanes === 1
+              ? [1]
+              : blockedLanes === 2
+              ? [1, 2]
+              : [1, 2, 3]
+          }
+          speedLimitKmh={80}
+          demandPce={Math.round(data.arrival_flow_pce)}
+          capacityPce={Math.round(data.bottleneck_capacity_pce)}
+          weavingIndex={weavingIndex}
+          heavyPct={14}
+          workzoneSpeedKmh={40}
+          storageM={data.upstream_exit_distance_m}
+          scenarioLabel={
+            isAr
+              ? `محاكاة ميكروسكوبية حية للحظر: ${data.incident_type} (${blockedLanes} حارات مغلقة — سرعة موجة الصدمة ${data.backward_shockwave_speed_kmh} كم/س)`
+              : `Live Incident Micro-Simulation: ${data.incident_type} (${blockedLanes} Blocked Lanes — Shockwave ${data.backward_shockwave_speed_kmh} km/h)`
+          }
+          planningQueueM={
+            data.queue_progression[data.queue_progression.length - 1]?.queue_length_m
+          }
+          language={language}
+        />
       )}
 
       {/* 60-Minute Queue Progression Growth Chart */}

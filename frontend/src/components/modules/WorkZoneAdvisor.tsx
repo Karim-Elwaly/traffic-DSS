@@ -136,9 +136,10 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       canvasWindow?.avg_capacity_pce ??
       (data?.workzone_capacity ?? 0)
   );
-  const canvasHeavyPct = canvasWindow
-    ? canvasWindow.heavy_vehicle_percentage
-    : 0;
+  const canvasHeavyPct =
+    canvasWindow && canvasWindow.heavy_vehicle_percentage > 0
+      ? canvasWindow.heavy_vehicle_percentage
+      : 12;
   const canvasHourLabel = canvasHour
     ? `${padHour(canvasHour.hour)}:00`
     : null;

@@ -190,6 +190,100 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
         </div>
       )}
 
+      {/* Dynamic Roadway Cross-Section (8 Lanes + Moveable Barrier QMB) */}
+      {data && (
+        <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <ArrowLeftRight className="w-4 h-4" />
+              </span>
+              <h3 className="text-sm font-bold text-slate-100">
+                {isAr ? 'المقطع العرضي التفاعلي للحارات (محور ٨ حارات مع حاجز ديناميكي متحرك QMB)' : 'Corridor Cross-Section (8 Lanes with QuickChange Moveable Barrier QMB)'}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400">
+                {isAr ? 'حالة التشغيل: ' : 'Mode: '}
+                <strong className={data.recommended_mode === 'REVERSIBLE_5_3' ? 'text-emerald-400' : 'text-slate-300'}>
+                  {data.recommended_mode === 'REVERSIBLE_5_3' ? '5 Inbound / 3 Outbound' : '4 Inbound / 4 Outbound'}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          {/* 8-Lane Visual Deck */}
+          <div className="grid grid-cols-8 gap-1 p-3 bg-[#070b14] rounded-lg border border-slate-800">
+            {/* Lanes 1-4: Inbound */}
+            {[1, 2, 3, 4].map((lane) => (
+              <div key={lane} className="flex flex-col items-center bg-emerald-950/20 border border-emerald-500/30 rounded py-2 px-1 text-center">
+                <span className="text-[10px] text-emerald-400 font-mono font-bold mb-1">
+                  L{lane}
+                </span>
+                <span className="text-sm font-bold text-emerald-400 mb-1">↓</span>
+                <span className="text-[9px] text-emerald-300 font-mono">IN</span>
+                <span className="text-[8px] text-slate-500 mt-1">{isAr ? 'مدخل' : 'Inbound'}</span>
+              </div>
+            ))}
+
+            {/* Lane 5: The Dynamic Reversible Lane */}
+            <div
+              className={`flex flex-col items-center rounded py-2 px-1 text-center relative transition-all duration-300 ${
+                data.recommended_mode === 'REVERSIBLE_5_3'
+                  ? 'bg-emerald-500/30 border-2 border-emerald-400 shadow-lg shadow-emerald-500/20'
+                  : 'bg-cyan-950/20 border border-cyan-500/30'
+              }`}
+            >
+              <span className={`text-[10px] font-mono font-bold mb-1 ${
+                data.recommended_mode === 'REVERSIBLE_5_3' ? 'text-emerald-300' : 'text-cyan-400'
+              }`}>
+                L5 ★
+              </span>
+              <span className={`text-sm font-bold mb-1 ${
+                data.recommended_mode === 'REVERSIBLE_5_3' ? 'text-emerald-300 animate-bounce' : 'text-cyan-400'
+              }`}>
+                {data.recommended_mode === 'REVERSIBLE_5_3' ? '↓' : '↑'}
+              </span>
+              <span className={`text-[9px] font-mono font-bold ${
+                data.recommended_mode === 'REVERSIBLE_5_3' ? 'text-emerald-300' : 'text-cyan-300'
+              }`}>
+                {data.recommended_mode === 'REVERSIBLE_5_3' ? 'INBOUND' : 'OUTBOUND'}
+              </span>
+              <span className="text-[8px] text-amber-400 font-bold mt-1">
+                {isAr ? 'عكوس' : 'Reversible'}
+              </span>
+            </div>
+
+            {/* Lanes 6-8: Outbound */}
+            {[6, 7, 8].map((lane) => (
+              <div key={lane} className="flex flex-col items-center bg-cyan-950/20 border border-cyan-500/30 rounded py-2 px-1 text-center">
+                <span className="text-[10px] text-cyan-400 font-mono font-bold mb-1">
+                  L{lane}
+                </span>
+                <span className="text-sm font-bold text-cyan-400 mb-1">↑</span>
+                <span className="text-[9px] text-cyan-300 font-mono">OUT</span>
+                <span className="text-[8px] text-slate-500 mt-1">{isAr ? 'مخرج' : 'Outbound'}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Barrier Position & Gantry Legend */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 text-[11px] text-slate-400">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              <span>
+                {isAr
+                  ? `موقع الحاجز الخرساني المتحرك (QMB): بين الحارة ${data.recommended_mode === 'REVERSIBLE_5_3' ? '5 و 6' : '4 و 5'}`
+                  : `QMB Barrier Position: Between Lane ${data.recommended_mode === 'REVERSIBLE_5_3' ? '5 and 6' : '4 and 5'}`}
+              </span>
+            </div>
+            <span className="text-slate-500 font-mono text-[10px]">
+              {isAr ? 'سرعة النقل الميكانيكي للحاجز: 8-12 كم/س' : 'Barrier Transfer Machine Speed: 8-12 km/h'}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Side-by-Side Configuration Comparison (4+4 vs 5+3) */}
       {data && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

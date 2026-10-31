@@ -721,8 +721,8 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           <Eye className="w-5 h-5 text-cyan-400" />
           <h4 className="text-sm font-semibold text-slate-100">
             {language === 'ar'
-              ? 'المحاكي الميكروسكوبي الحي (IDM + دمج إجباري عند منطقة العمل)'
-              : 'Live Microscopic Simulator (IDM + mandatory work-zone merge)'}
+              ? 'المحاكي الميكروسكوبي الحي (نموذج السائق الذكي IDM + فيزياء الدمج الإجباري)'
+              : 'Live Microscopic Highway Simulator (IDM + Dynamic Merge Physics)'}
           </h4>
         </div>
         <div className="flex items-center gap-2">

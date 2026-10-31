@@ -312,6 +312,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
         language={language}
         turningPct={turningPct}
         heavyPct={heavyPct}
+        uturnDistanceM={uturnDist}
       />
     </div>
   );
