@@ -189,6 +189,7 @@ def predict_incident_shockwave(
 
     return ShockwaveResponse(
         corridor_id=request.corridor_id,
+        incident_type=request.incident_type.upper(),
         arrival_flow_pce=round(q1, 1),
         arrival_speed_kmh=round(v1, 1),
         arrival_density_veh_km=round(k1_veh, 1),

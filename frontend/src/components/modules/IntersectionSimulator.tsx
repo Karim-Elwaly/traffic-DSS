@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Split, Award } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Split, Award, Loader2 } from 'lucide-react';
 import { IntersectionCanvas } from '../simulation/IntersectionCanvas';
 import { IntersectionResponse, simulateIntersectionsAPI } from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
@@ -22,8 +22,13 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
   const [uturnDist, setUturnDist] = useState<number>(450);
   const [data, setData] = useState<IntersectionResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Slider changes can overlap. Only the newest request may publish data, so a
+  // slow older response cannot overwrite the current scenario.
+  const requestSeq = useRef(0);
 
   const runSimulation = async () => {
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
     setIsLoading(true);
     try {
       const res = await simulateIntersectionsAPI({
@@ -35,12 +40,12 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
         engine_mode: engineMode,
         simulation_duration_sec: 300,
       });
-      setData(res);
+      if (seq === requestSeq.current) setData(res);
     } catch (err) {
       console.error(err);
-      setData(null);
+      if (seq === requestSeq.current) setData(null);
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeq.current) setIsLoading(false);
     }
   };
 
@@ -64,6 +69,9 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
     }
   };
 
+  const signalPlanning = data?.alternatives.find((a) => a.id === 'SIGNAL');
+  const uturnPlanning = data?.alternatives.find((a) => a.id === 'UTURN');
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -72,6 +80,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
             <Split className="w-6 h-6 text-cyan-400" />
             {t.int_title}
+            {isLoading && <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />}
           </h2>
           <p className="text-xs text-slate-400 mt-1">{t.int_subtitle}</p>
         </div>
@@ -209,7 +218,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-100">{t.int_comparison_matrix}</h3>
             <span className="text-xs text-slate-400 font-mono">
-              Total Flow: {mainFlow + crossFlow} veh/h
+              Total Flow: {data.inputs.main_flow + data.inputs.cross_flow} veh/h
             </span>
           </div>
 
@@ -313,6 +322,10 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
         turningPct={turningPct}
         heavyPct={heavyPct}
         uturnDistanceM={uturnDist}
+        signalPlanningDelaySec={signalPlanning?.average_delay_sec}
+        signalPlanningQueueM={signalPlanning?.queue_95th_m}
+        uturnPlanningDelaySec={uturnPlanning?.average_delay_sec}
+        uturnPlanningQueueM={uturnPlanning?.queue_95th_m}
       />
     </div>
   );

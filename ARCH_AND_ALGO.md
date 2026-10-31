@@ -88,40 +88,25 @@ $$P_{\text{pax}, i} = N_{\text{car}}(1.4) + N_{\text{microbus}}(14.0) + N_{\text
 #### Step 1: Work-Zone Effective Capacity Reduction
 When $n_{\text{closed}}$ lanes are blocked out of $N=4$ base lanes (base capacity $C_{\text{base}} = 2,000\text{ PCE/h/lane}$):
 
-1. **Merge Turbulence Friction Factor ($f_{\text{merge}}$):**
-   $$f_{\text{merge}} = \max\left(0.40, 1.0 - 0.12 \times n_{\text{closed}}\right)$$
+> **Current implementation:** the authoritative queue/delay equations are in
+> [`ALGORITHMS.md`](ALGORITHMS.md) §2. Capacity uses a 6% merge loss per closed
+> lane, a 2% median-lane penalty, and does not re-apply $f_{\text{HV}}$ because
+> demand is already in PCE/h. Queues are bounded by upstream storage and delay
+> comes from Little's law.
 
-2. **Specific Lane Closure Penalty ($f_{\text{lane}}$):**
-   * **Lane 1 Closed** (Rightmost slow lane where heavy freight & microbuses load/unload): Forces heavy vehicles to cut across middle lanes:
-     $$f_{\text{lane}} = 0.88$$
-   * **Lane 2 or Lane 3 Closed** (Center lanes): Causes bilateral merging friction from both flanks:
-     $$f_{\text{lane}} = 0.90$$
-   * **Lane 4 Closed** (Leftmost high-speed lane): High collision risk requiring extended warning taper:
-     $$f_{\text{lane}} = 0.93$$
-
-3. **Effective Hourly Work-Zone Capacity ($C_{\text{wz}}$):**
-   $$C_{\text{wz}} = C_{\text{base}} \times (4 - n_{\text{closed}}) \times f_{\text{merge}} \times f_{\text{lane}} \times f_{\text{HV}}$$
+1. **Merge factor:** $f_{\text{merge}} = \max(0.40, 1 - 0.06n_{\text{closed}})$.
+2. **Lane factor:** $f_{\text{lane}} = 0.98$ if Lane 2 or 3 is closed, else $1.00$.
+3. **Capacity:** $C_{\text{wz}} = 2000(4-n_{\text{closed}})f_{\text{merge}}f_{\text{lane}}$.
+4. **Storage:** $N_{\text{store}} = D_{\text{exit}}(4-n_{\text{closed}})/6.5$ vehicles;
+   excess demand is metered upstream when the queue is full.
 
 #### Step 2: Hourly Queue Accumulation & Delay Recursion
 For a candidate maintenance window starting at $t_0$ spanning duration $D$ hours:
-Initialize residual vehicular queue $Q_{\text{queue}}(t_0 - 1) = 0.0$.
-
-For each hour $t \in [t_0, t_0 + D)$:
-1. **Vehicular Queue Carryover:**
-   $$Q_{\text{queue}}(t) = \max\left(0.0, Q_{\text{queue}}(t-1) + Q_{\text{PCE}}(t) - C_{\text{wz}}\right)$$
-
-2. **Physical Queue Length ($L_{\text{queue}}$ in meters):**
-   $$L_{\text{queue}}(t) = \frac{Q_{\text{queue}}(t) \times 6.5\text{ m}}{4 - n_{\text{closed}}}$$
-   *(where $6.5\text{ m}$ is the average bumper-to-bumper queue spacing per vehicle)*
-
-3. **Spillback Flag:**
-   $$\text{Spillback}(t) = \begin{cases} 
-   \text{True} & \text{if } L_{\text{queue}}(t) \ge D_{\text{upstream\_exit}} \\ 
-   \text{False} & \text{otherwise} 
-   \end{cases}$$
-
-4. **Delay per Vehicle ($d_{\text{wz}}$ in seconds/vehicle):**
-   $$d_{\text{wz}}(t) = 12.0 \times \left(\frac{Q_{\text{PCE}}(t)}{\max(1, C_{\text{wz}})}\right)^3 + \left(\frac{Q_{\text{queue}}(t)}{\max(1, C_{\text{wz}})}\right) \times 1800.0$$
+$$Q(t) = \min\left(N_{\text{store}}, \max(0, Q(t-1) + Q_{\text{veh}}(t) - C_{\text{veh}})\right)$$
+$$L(t) = \min\left(D_{\text{exit}}, \frac{Q(t) \times 6.5}{4-n_{\text{closed}}}\right)$$
+Delay is the integrated vehicle-hours in queue divided by joining vehicles,
+plus the work-zone geometric/merge delay, capped at 600 s. Spillback is true
+at 95% of storage.
 
 5. **Person-Hours of Delay ($PHD$):**
    $$\text{PHD}(t) = \left(\frac{Q_{\text{PCE}}(t) \times d_{\text{wz}}(t)}{3600.0}\right) \times \left(\frac{P_{\text{pax}}(t)}{\max(1, Q_{\text{PCE}}(t))}\right)$$
@@ -138,14 +123,17 @@ def optimize_schedule(demands_168h, passengers_168h, D, C_wz, D_exit):
         
         for step in range(D):
             h = (start_h + step) % 168
-            queue = max(0.0, queue + demands_168h[h] - C_wz)
-            q_len = (queue * 6.5) / open_lanes
+            avg_pce = 1.125 + 1.3 * heavy_168h[h]
+            queue, vehicle_hours, joining = storage_queue_step(
+                queue, demands_168h[h] / avg_pce, C_wz / avg_pce, N_store
+            )
+            q_len = min(D_exit, queue * 6.5 / open_lanes)
             max_q = max(max_q, q_len)
-            if q_len >= D_exit:
+            if q_len >= 0.95 * D_exit:
                 has_spillback = True
-            
-            d_veh = 12.0 * ((demands_168h[h] / C_wz) ** 3) + (queue / C_wz) * 1800.0
-            window_phd += (demands_168h[h] * d_veh / 3600.0) * (passengers_168h[h] / demands_168h[h])
+            base = geometric_delay(speed_limit, open_lanes)
+            d_veh = min(600.0, vehicle_hours / max(1e-6, joining) * 3600.0 + base)
+            window_phd += (vehicle_hours + base * joining / 3600.0) * (passengers_168h[h] / (demands_168h[h] / avg_pce))
             
         penalty = 5000.0 if has_spillback else 0.0
         fitness = window_phd + penalty
@@ -313,7 +301,7 @@ $$t_{\text{travel}}(k) = \left(\frac{D_{\text{corridor\_km}}}{V_{\text{in}}(k)}\
 $$\text{Travel Time Savings: } \Delta t_{\%} = \max\left(0.0, \frac{t_{\text{travel}}(\text{Standard}) - t_{\text{travel}}(\text{Reversible})}{t_{\text{travel}}(\text{Standard})} \times 100.0\right)$$
 
 #### Step 3: Green Wave Signal Progression Offsets
-Calculates dynamic signal progression offsets across a configurable number of synchronized intersections $N \in [1, 10]$ at target arterial progression speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$ and fixed 450 m spacing:
+Calculates dynamic signal progression offsets across a configurable number of synchronized intersections $N \in [1, 10]$ at target arterial progression speed $V_{\text{prog}} = 60\text{ km/h} = 16.67\text{ m/s}$. Spacing is derived from the actual corridor: $D_{\text{link}} = D_{\text{corridor}} \times 1000 / N$ (1,700 m for 8.5 km / 5 nodes):
 * **Cycle Length:** $C_{\text{cycle}} = 90.0\text{ sec}$.
 * **Green Window:** $G_{\text{window}} = 52.0\text{ sec}$.
 * **Distance of Node $k$:** $D_k = (k - 1) \times 450\text{ m}$.

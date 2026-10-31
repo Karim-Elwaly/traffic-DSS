@@ -15,18 +15,18 @@ A full-stack, production-grade **Intelligent Traffic Decision Support System (IT
    - **PCE Flow & Human Occupancy:** Dynamically calculates Passenger Car Equivalents and human passenger flows across 5 vehicle classes (Cars, 14-Seat Microbuses, Transit Buses, Heavy Trucks, Motorcycles).
    - **Level of Service (LoS A-F):** Automated grading based on delay ($d$) and volume-to-capacity ($v/c$).
 2. **4 Executive Decision Support Modules:**
-   - **Module 1 (Work-Zone Advisor):** 168-hour maintenance optimizer ranking the Top 3 optimal closure windows minimizing Person-Hours of Delay (PHD), calculating merge friction ($f_{\text{merge}}$), lane-specific penalties ($f_{\text{lane}}$), taper length, buffer space, and bilingual Standard Operating Procedures (SOP).
+   - **Module 1 (Work-Zone Advisor):** 168-hour maintenance optimizer ranking the Top 3 optimal closure windows minimizing Person-Hours of Delay (PHD), calculating storage-bounded queues, Little's-law delay, merge/lane/taper geometry, and bilingual Standard Operating Procedures (SOP).
    - **Module 2 (Intersection Simulator):** Side-by-side evaluation of 4 geometric alternatives:
      1. Uncontrolled Open Intersection (32 conflict points)
      2. Webster's Adaptive 4-Phase Traffic Signal (8 conflict points)
      3. Closed Median + Protected U-Turn Corridor (4 conflict points - Egyptian Axis Model)
      4. Modern 3-Lane Roundabout (8 conflict points)
    - **Module 3 (Incident Shockwave Predictor):** LWR backward shockwave propagation speed ($w$ km/h), urgent countdown to upstream exit blockage ($T_{\text{block}}$ minutes), 60-minute queue progression curve, and micro-friction remedies.
-   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel time savings %, and configurable Green Wave signal progression offsets (450 m node spacing).
+   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel-time-derived delay savings, and Green Wave progression offsets whose spacing is derived from the actual corridor length and node count (1.70 km for the default 8.5 km / 5-node corridor).
 3. **Live 60fps Microscopic Canvases:**
-   - `HighwayCanvas.tsx`: Seeded Poisson arrivals (PCE-calibrated vehicle mix), IDM car-following, mandatory work-zone merge, and live measured flow/queue/delay/speed.
-   - `IntersectionCanvas.tsx`: Webster-timed 4-phase signal vs protected U-Turn corridor, IDM car-following, right-turn Bezier geometry with right-turn-on-red, and live measured KPIs.
-   - Both canvases run an independent deterministic browser-side microsimulation; they are not SUMO renders and never display fabricated telemetry.
+   - `HighwayCanvas.tsx`: seeded Poisson arrivals (PCE-calibrated vehicle mix), IDM car-following, mandatory work-zone merge, global upstream storage metering, per-lane PCE capacity meters, and measured flow/queue/delay/speed. A visible analytical reference line shows the corresponding planning delay and queue.
+   - `IntersectionCanvas.tsx`: Webster-timed 4-phase signal vs protected U-Turn corridor, IDM car-following, right-turn Bezier geometry with right-turn-on-red, measured KPIs over two signal cycles, and an HCM/Webster analytical reference strip for each panel.
+   - Both canvases run an independent deterministic browser-side microsimulation; they are not SUMO renders, publish `—` during warm-up, and never display fabricated telemetry.
 4. **Bilingual Executive Readiness (RTL / LTR):** Instant toggle between English (LTR) and Egyptian / Standard Arabic (RTL) with dynamic `dir="rtl"` layout switching.
 5. **Real-time Edge CV Ingestion Webhook:** `POST /api/cv/ingest` ready for YOLOv8/v11 + ByteTrack camera feeds.
 
@@ -39,10 +39,10 @@ For deep technical derivations and pseudocode, consult [ARCHITECTURE.md](file://
 | Module | Core Physics & Algorithm | Primary Output |
 | :--- | :--- | :--- |
 | **PCE & Occupancy** | $q_{\text{PCE}} = \sum N_k \cdot w_k$, $P_{\text{pax}} = \sum N_k \cdot O_k$ | Homogenized flow & human throughput |
-| **Module 1: Work-Zone** | $C_{\text{wz}} = 2000 \cdot (4-n) \cdot f_{\text{merge}} \cdot f_{\text{lane}} \cdot f_{\text{HV}}$, 168h window optimizer | Top 3 optimal windows, buffer/taper, field SOP |
-| **Module 2: Intersection** | Webster optimal cycle $C_{\text{opt}}$, detour time $\Delta t_{\text{geo}}$, roundabout gap acceptance | 4-way comparison matrix & winning recommendation |
-| **Module 3: Shockwave** | LWR wave velocity $w = \|\Delta q / \Delta k\|$, exit blockage countdown $T_{\text{block}}$ | Speed gauge, red countdown, 60-min queue trajectory |
-| **Module 4: Reversible** | Split ratio $>68\%$ with outbound 4+4 v/c $<0.45$, configurable-node Green Wave offsets $\Delta t = D / V_{\text{prog}}$ (450 m spacing) | 4+4 vs 5+3 comparison, Green Wave schedule |
+| **Module 1: Work-Zone** | $C_{\text{wz}} = 2000 \cdot n_{\text{open}} \cdot \max(0.40,1-0.06n_{\text{closed}}) \cdot f_{\text{lane}}$, storage-bounded queue and Little's-law delay, 168h optimizer | Top 3 optimal windows, buffer/taper, field SOP |
+| **Module 2: Intersection** | Webster cycle/green splits, HCM uniform + incremental delay, protected U-turn detour/weave delay, roundabout entry capacity | 4-way comparison matrix & winning recommendation |
+| **Module 3: Shockwave** | LWR wave velocity $w = \Delta q / \Delta k$, 6.5 m jam density, capped exit-blockage countdown | Speed gauge, red countdown, 60-min queue trajectory |
+| **Module 4: Reversible** | Split ratio $>68\%$ with outbound 4+4 v/c $<0.45$, travel-time delay, Green Wave offsets $\Delta t = D/V_{\text{prog}}$ with geometric spacing | 4+4 vs 5+3 comparison, Green Wave schedule |
 
 ---
 
@@ -94,7 +94,7 @@ traffic-dss-platform/
         ├── i18n/
         │   └── translations.ts        # Full Arabic (RTL) & English (LTR) dictionary
         ├── api/
-        │   └── client.ts              # Typed API client + deterministic local fallback
+        │   └── client.ts              # Typed API client + corridor bootstrap fallback
         ├── components/
         │   ├── layout/
         │   │   ├── TopCommandBar.tsx  # Corridor selector, AR/EN toggle, Status

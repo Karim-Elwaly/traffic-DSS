@@ -220,6 +220,7 @@ class ShockwaveSOP(BaseModel):
 
 class ShockwaveResponse(BaseModel):
     corridor_id: str
+    incident_type: str = Field(default="COLLISION", description="Echo of the simulated incident type")
     arrival_flow_pce: float
     arrival_speed_kmh: float
     arrival_density_veh_km: float

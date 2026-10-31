@@ -315,7 +315,7 @@ Both simulation canvases ([HighwayCanvas.tsx](file:///d:/projects/traffic_dss/fr
    - **Description:** Calculates LWR backward shockwave speed, countdown to upstream exit blockage, and 60-min queue expansion trajectory.
 
 7. `POST /api/dss/reversible-evaluate`
-   - **Description:** Evaluates directional split, 4+4 vs 5+3 reversible reallocation, and configurable-node Green Wave offsets at 450 m spacing.
+   - **Description:** Evaluates directional split, 4+4 vs 5+3 reversible reallocation, and configurable-node Green Wave offsets with spacing derived from the actual corridor length and node count (1.70 km for the default 8.5 km / 5-node corridor).
 
 8. `POST /api/cv/ingest`
    - **Description:** Ingests live edge YOLO + ByteTrack counts and updates active corridor state.

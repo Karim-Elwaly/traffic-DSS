@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   AreaChart,
   Area,
@@ -38,6 +38,9 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
   const [scope, setScope] = useState<'daily' | 'weekly'>('weekly');
   const [loading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<WorkZoneResponse | null>(null);
+  // Rapid lane/day/duration changes can overlap. Publish only the newest
+  // optimization so a stale response cannot replace the current scenario.
+  const requestSeq = useRef(0);
 
   const toggleLane = (laneNum: number) => {
     if (closedLanes.includes(laneNum)) {
@@ -52,6 +55,8 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
   };
 
   const runOptimization = async () => {
+    const seq = requestSeq.current + 1;
+    requestSeq.current = seq;
     setLoading(true);
     try {
       const res = await optimizeWorkZoneAPI({
@@ -63,12 +68,12 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
         engine_mode: engineMode,
         simulation_duration_sec: 60,
       });
-      setData(res);
+      if (seq === requestSeq.current) setData(res);
     } catch (err) {
       console.error(err);
-      setData(null);
+      if (seq === requestSeq.current) setData(null);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   };
 
@@ -218,7 +223,7 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
               <Clock className="w-4 h-4 text-amber-400" />
               {t.wz_duration}
             </label>
-            <span className="text-xs font-bold font-mono text-amber-400">{durationHours} Hours</span>
+            <span className="text-xs font-bold font-mono text-amber-400">{durationHours} {isAr ? 'ساعات' : 'Hours'}</span>
           </div>
           <input
             type="range"

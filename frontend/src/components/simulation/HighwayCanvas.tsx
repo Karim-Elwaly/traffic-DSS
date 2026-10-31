@@ -41,6 +41,8 @@ interface Vehicle {
   color: string;
   lengthM: number;
   widthPx: number;
+  /** Position where this trip started (entry or upstream storage slot). */
+  startXM: number;
   departTime: number;
   braking: boolean;
   mergeCooldown: number;
@@ -152,13 +154,30 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     const vehPerSec = pceToVehicleFlow(demandPce, heavyPct) / 3600;
     const meanInterArrival = vehPerSec > 0 ? 1 / vehPerSec : 1e9;
     const upstreamStorageM = Math.max(120, storageM);
-    const postedSpeed = Math.max(8, speedLimitKmh / 3.6);
     const wzSpeed = Math.max(8, workzoneSpeedKmh / 3.6);
+    // The analytical engine defines the work-zone capacity. Each open lane is
+    // metered independently at its share of that capacity, so the live
+    // bottleneck cannot discharge more traffic than the plan says it can and
+    // no lane can monopolise a shared meter. Each vehicle consumes a headway
+    // proportional to its PCE.
+    const capacityVehPerSec =
+      pceToVehicleFlow(Math.max(1, capacityPce), heavyPct) / 3600;
+    const openLaneCount = Math.max(
+      1,
+      [1, 2, 3, 4].filter((lane) => !closedLanes.includes(lane)).length
+    );
+    const laneDischargeHeadway =
+      openLaneCount / Math.max(0.05, capacityVehPerSec);
 
     let simClock = 0;
     let nextArrival = exponential(rng, meanInterArrival);
     let lastTime = performance.now();
     let lastStatsAt = 0;
+    const lastTaperDischarge = [-1e9, -1e9, -1e9, -1e9];
+    // PCE-weighted crossings of the taper, used for the measured bottleneck
+    // throughput. Measuring here (not at the downstream exit) avoids adding the
+    // work-zone travel time to the reporting window.
+    const taperLog: Array<{ time: number; pce: number }> = [];
 
     const isOpen = (lane: number) => !closedLanes.includes(lane);
 
@@ -227,6 +246,16 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     };
 
     const insertVehicle = () => {
+      // The 600 m approach is shared by all lanes: once the rearmost vehicle
+      // anywhere in the approach reaches the upstream exit, the storage is
+      // full and further demand is metered/diverted there. Without this global
+      // check a short closed-lane queue kept accepting cars while the open
+      // lanes were full, turning the closure lane into a parking lot.
+      const globalRear = vehiclesRef.current.reduce(
+        (min, v) => Math.min(min, v.xM - v.lengthM / 2),
+        ENTRY_M
+      );
+      if (globalRear < -upstreamStorageM + 5) return;
       const spec = sampleVehicleClass(rng, heavyPct);
       const lane = chooseLane(spec);
       // Insert at the upstream boundary unless a vehicle is still sitting at
@@ -256,6 +285,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         color: pickColor(rng, spec),
         lengthM: spec.lengthM,
         widthPx: Math.max(7, spec.widthM * 3.4),
+        startXM: x,
         departTime: simClock,
         braking: false,
         mergeCooldown: 0,
@@ -305,6 +335,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
             color: pickColor(rng, spec),
             lengthM: spec.lengthM,
             widthPx: Math.max(7, spec.widthM * 3.4),
+            startXM: ENTRY_M,
             departTime,
             braking: false,
             mergeCooldown: 0,
@@ -322,14 +353,20 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       if (!isOpen(targetLane)) return;
 
       const distToClosure = TAPER_END_M - veh.xM;
-      const urgent = distToClosure < 55;
+      const urgent = distToClosure < 80;
       // Dense traffic leaves only a couple of metres of clear gap. A zipper
       // merge is still physically possible when the follower has at least
       // ~1 s of headway and can brake, so the old absolute-speed test (which
       // required the follower to be no faster than the merging vehicle)
-      // deadlocked stopped lane-1 vehicles at the taper.
-      const requiredAhead = urgent ? 2.0 : 10 + veh.speed * 0.9;
-      const requiredBehind = urgent ? 1.5 : 6 + veh.speed * 0.4;
+      // deadlocked stopped lane-1 vehicles at the taper. The urgent thresholds
+      // now scale with speed: at a standstill a 1.2 m bumper gap is enough for
+      // a courtesy merge, while a fast approach still needs a real headway.
+      const requiredAhead = urgent
+        ? Math.max(1.2, veh.speed * 0.25)
+        : 10 + veh.speed * 0.9;
+      const requiredBehind = urgent
+        ? Math.max(1.0, veh.speed * 0.15)
+        : 6 + veh.speed * 0.4;
 
       let aheadGap = Infinity;
       let aheadSpeed = veh.speed;
@@ -378,14 +415,80 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         guard += 1;
       }
 
+      // Last-resort zipper merge at the taper nose. A closed-lane vehicle can
+      // be boxed in when the adjacent lane is stopped bumper-to-bumper; without
+      // this a single blocked vehicle turns the closed lane into a parking lot
+      // and its delay grows without bound. The merge is only performed when a
+      // physically valid slot exists (after a small courtesy shift of the
+      // follower), and the hard safety pass below resolves any residual overlap.
+      const forceMergeAtNose = (veh: Vehicle) => {
+        const targets = [veh.lane - 1, veh.lane + 1].filter(
+          (lane) => lane >= 1 && lane <= 4 && isOpen(lane)
+        );
+        let best: {
+          target: number;
+          mergeX: number;
+          follower: Vehicle | undefined;
+          followerX: number;
+          push: number;
+        } | null = null;
+        for (const target of targets) {
+          const list = laneVehicles(target);
+          const leader = list
+            .filter((other) => other.xM >= veh.xM)
+            .sort((a, b) => a.xM - b.xM)[0];
+          const follower = list
+            .filter((other) => other.xM < veh.xM)
+            .sort((a, b) => b.xM - a.xM)[0];
+          // Slot in behind the leader at the merge point. When the target lane
+          // is jammed there is no pre-existing gap, so the follower is shifted
+          // back by a bounded courtesy distance (a zipper merge). A larger push
+          // would teleport a queue and is rejected.
+          const mergeX = leader
+            ? Math.min(
+                veh.xM,
+                leader.xM - (leader.lengthM + veh.lengthM) / 2 - 0.6
+              )
+            : veh.xM;
+          let push = 0;
+          let followerX = 0;
+          if (follower) {
+            followerX =
+              mergeX -
+              (veh.lengthM + follower.lengthM) / 2 -
+              Math.max(0.8, follower.spec.minGapM * 0.5);
+            push = follower.xM - followerX;
+          }
+          if (push > 16) continue; // would displace more than ~2 vehicles
+          if (!best || push < best.push) {
+            best = { target, mergeX, follower, followerX, push };
+          }
+        }
+        if (!best) {
+          return false;
+        }
+        if (best.follower && best.push > 0) {
+          best.follower.xM = best.followerX;
+          best.follower.speed = Math.min(best.follower.speed, veh.speed);
+        }
+        veh.lane = best.target;
+        veh.xM = best.mergeX;
+        veh.mergeCooldown = 2.5;
+        veh.laneChanges += 1;
+        totalLaneChangesRef.current += 1;
+        veh.braking = true;
+        return true;
+      };
+
       for (const veh of vehiclesRef.current) {
         veh.mergeCooldown = Math.max(0, veh.mergeCooldown - dtSim);
 
         // Mandatory merge out of a closed lane inside the advance-warning
-        // zone. Before this point vehicles may legitimately still use the lane.
+        // zone. The warning starts ~150 m before the taper so off-screen
+        // vehicles merge early instead of all arriving at the nose at once.
         if (
           !isOpen(veh.lane) &&
-          veh.xM > TAPER_START_M - 70 &&
+          veh.xM > TAPER_START_M - 150 &&
           veh.xM < TAPER_END_M
         ) {
           const candidates = [veh.lane - 1, veh.lane + 1, veh.lane - 2, veh.lane + 2]
@@ -400,6 +503,10 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
             const target = veh.lane + (rng() < 0.5 ? -1 : 1);
             if (target >= 1 && target <= 4) tryLaneChange(veh, target, simClock);
           }
+        }
+
+        if (!isOpen(veh.lane) && veh.xM > TAPER_END_M - 30) {
+          forceMergeAtNose(veh);
         }
 
         let desired = speedLimitKmh / 3.6;
@@ -435,10 +542,37 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           Math.max(0, desired * veh.spec.speedFactor),
           Math.max(0.1, gap),
           leaderSpeed,
-          veh.spec
+          veh.spec,
+          1,
+          // Queue discipline: below 5 m/s drivers leave smaller gaps than the
+          // free-flow time headway, so a 600 m storage holds a realistic jam
+          // density instead of a sparse, fast-moving line.
+          veh.speed < 5 && veh.xM < TAPER_END_M + 60 ? 0.25 : 1
         );
         veh.speed = Math.max(0, veh.speed + accel * dtSim);
-        veh.xM += veh.speed * dtSim;
+        const nextX = veh.xM + veh.speed * dtSim;
+        // Capacity-metered taper. A vehicle holding at the stop line is
+        // released across the line at its scheduled slot. Moving it across in
+        // the same tick (instead of waiting for IDM to accelerate from rest)
+        // removes the artificial start-up lost time that made the measured
+        // discharge about 15% below the HCM capacity.
+        const atTaper =
+          veh.xM >= TAPER_END_M - 1.2 && veh.xM < TAPER_END_M && isOpen(veh.lane);
+        if (atTaper) {
+          const dischargeHeadway =
+            laneDischargeHeadway * (veh.spec.pce / Math.max(0.5, avgPce));
+          if (simClock - lastTaperDischarge[veh.lane] < dischargeHeadway) {
+            veh.xM = TAPER_END_M - 0.6;
+            veh.speed = 0;
+          } else {
+            lastTaperDischarge[veh.lane] = simClock;
+            taperLog.push({ time: simClock, pce: veh.spec.pce });
+            veh.xM = Math.max(nextX, TAPER_END_M + 0.6);
+            veh.speed = Math.max(veh.speed, 2.0);
+          }
+        } else {
+          veh.xM = nextX;
+        }
         // Physical barrier at the taper nose: a vehicle that could not merge
         // must stop at the closure instead of driving through the work zone.
         if (!isOpen(veh.lane) && veh.xM > TAPER_END_M - veh.lengthM / 2 - 0.2) {
@@ -471,7 +605,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       for (const veh of vehiclesRef.current) {
         if (veh.xM > EXIT_M) {
           const freeFlowTime =
-            (EXIT_M - ENTRY_M) / Math.max(8, speedLimitKmh / 3.6);
+            (EXIT_M - veh.startXM) / Math.max(8, speedLimitKmh / 3.6);
           completedRef.current.push({
             time: simClock,
             pce: veh.spec.pce,
@@ -484,15 +618,22 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       }
       vehiclesRef.current = remaining;
 
-      const cutoff = simClock - 65;
+      // Keep a generous buffer so the 120 s delay window is always complete.
+      const cutoff = simClock - 125;
       completedRef.current = completedRef.current.filter((c) => c.time >= cutoff);
+      while (taperLog.length > 0 && taperLog[0].time < simClock - 65) {
+        taperLog.shift();
+      }
     };
 
     const computeStats = (): LiveStats => {
-      const windowSec = Math.max(10, Math.min(60, simClock));
-      const recent = completedRef.current.filter((c) => c.time >= simClock - 60);
-      const throughput = (recent.reduce((s, c) => s + c.pce, 0) * 3600) / windowSec;
-      const warmup = simClock < 15 || totalCompletedRef.current < 20;
+      const flowWindowSec = Math.max(10, Math.min(60, simClock));
+      const recentCrossings = taperLog.filter((c) => c.time >= simClock - 60);
+      const throughput =
+        (recentCrossings.reduce((s, c) => s + c.pce, 0) * 3600) / flowWindowSec;
+      // Do not publish KPIs from the initial transient: the network starts
+      // from a warm start but the first minute still builds the queue.
+      const warmup = simClock < 60 || totalCompletedRef.current < 20;
 
       let queueM = 0;
       for (let lane = 1; lane <= 4; lane += 1) {
@@ -509,19 +650,16 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
       queueM = Math.min(upstreamStorageM, queueM);
       peakQueueRef.current = Math.max(peakQueueRef.current, queueM);
 
-      // Average delay over completed trips AND active trips' delay so far.
-      // Completed-only averages lag by minutes during oversaturation, when the
-      // queue is growing and the most-delayed vehicles have not exited yet.
-      const completedDelaySum = completedRef.current.reduce((s, c) => s + c.delay, 0);
-      const activeDelaySum = vehiclesRef.current.reduce((s, v) => {
-        const travelled = Math.max(0, v.xM - ENTRY_M);
-        const freeFlowTime = travelled / postedSpeed;
-        return s + Math.max(0, simClock - v.departTime - freeFlowTime);
-      }, 0);
-      const delaySampleCount = completedRef.current.length + vehiclesRef.current.length;
+      // Average delay of the vehicles discharged in the last two minutes. A
+      // completed-trip window is phase-unbiased and, unlike blending active
+      // trips of different ages, does not drift during queue growth.
+      const delayWindowSec = Math.max(10, Math.min(120, simClock));
+      const recentCompleted = completedRef.current.filter(
+        (c) => c.time >= simClock - delayWindowSec
+      );
       const avgDelay =
-        delaySampleCount > 0
-          ? (completedDelaySum + activeDelaySum) / delaySampleCount
+        recentCompleted.length > 0
+          ? recentCompleted.reduce((s, c) => s + c.delay, 0) / recentCompleted.length
           : 0;
       const avgSpeed =
         vehiclesRef.current.length > 0
@@ -699,7 +837,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           languageRef.current === 'ar'
             ? `⚠ ارتداد طابور ${Math.round(frameStats.queueM)} م — دمج إجباري`
             : `⚠ ${Math.round(frameStats.queueM)} m queue — mandatory merge`;
-        ctx.fillText(txt, Math.max(16, taperEndX - 210), ROAD_TOP - 10);
+        ctx.fillText(txt, 16, ROAD_TOP - 10);
       }
 
       animationFrameIdRef.current = requestAnimationFrame(render);
@@ -710,7 +848,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [closedLanes, speedLimitKmh, demandPce, weavingIndex, heavyPct, workzoneSpeedKmh, storageM, resetToken]);
+  }, [closedLanes, speedLimitKmh, demandPce, capacityPce, weavingIndex, heavyPct, workzoneSpeedKmh, storageM, resetToken]);
 
   const measuredVc = capacityPce > 0 ? live.throughputPce / capacityPce : 0;
 
@@ -814,7 +952,14 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
 
       {(planningDelaySec !== undefined || planningQueueM !== undefined) && (
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono text-slate-500">
-          <span>
+          <span
+            className="cursor-help"
+            title={
+              language === 'ar'
+                ? 'المرجع التحليلي تقدير تخطيطي يفترض امتلاء المخزن وكثافة توقف 6.5 م/مركبة؛ القيم الحية مقاسة من محاكاة IDM.'
+                : 'The analytical reference is a planning estimate that assumes a full storage at 6.5 m/veh jam spacing; live values are measured from the IDM simulation.'
+            }
+          >
             {language === 'ar' ? 'المرجع التحليلي للساعة:' : 'Analytical reference for this hour:'}
           </span>
           {planningDelaySec !== undefined && (
@@ -852,7 +997,9 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
             </span>
           )}
           <span className="text-[10px] text-slate-500 font-mono">
-            {live.active} active · {live.completed} trips · {live.laneChanges} lane changes
+            {language === 'ar'
+              ? `${live.active} مركبة نشطة · ${live.completed} رحلة · ${live.laneChanges} تغيير حارة`
+              : `${live.active} active · ${live.completed} trips · ${live.laneChanges} lane changes`}
           </span>
           <span>{language === 'ar' ? 'سرعة المحاكاة:' : 'Sim speed:'}</span>
           {[1, 2, 4, 8].map((s) => (

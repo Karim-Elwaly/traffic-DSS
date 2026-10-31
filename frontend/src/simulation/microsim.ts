@@ -157,12 +157,15 @@ export function idmAcceleration(
   gap: number,
   leaderSpeed: number,
   spec: Pick<VehicleClassSpec, 'accel' | 'decel' | 'minGapM' | 'headwayS'>,
-  scaleM = 1
+  scaleM = 1,
+  headwayScale = 1
 ): number {
   const v0 = Math.max(0.1, desiredSpeed);
   const freeTerm = 1 - Math.pow(Math.max(0, speed) / v0, 4);
   const minGap = spec.minGapM * scaleM;
-  const headway = spec.headwayS;
+  // Drivers close up at crawl speeds; a constant time headway overestimates
+  // queue storage. Callers can pass headwayScale < 1 in stop-and-go queues.
+  const headway = spec.headwayS * headwayScale;
   const dv = speed - leaderSpeed;
   const sStar =
     minGap +

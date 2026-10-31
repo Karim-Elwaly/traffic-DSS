@@ -34,6 +34,11 @@ interface IntersectionCanvasProps {
   turningPct?: number;
   heavyPct?: number;
   uturnDistanceM?: number;
+  /** Analytical HCM/Webster planning values for the same scenario. */
+  signalPlanningDelaySec?: number;
+  signalPlanningQueueM?: number;
+  uturnPlanningDelaySec?: number;
+  uturnPlanningQueueM?: number;
 }
 
 interface SimVehicle {
@@ -165,6 +170,10 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   turningPct = 18,
   heavyPct = 12,
   uturnDistanceM = 450,
+  signalPlanningDelaySec,
+  signalPlanningQueueM,
+  uturnPlanningDelaySec,
+  uturnPlanningQueueM,
 }) => {
   const isAr = language === 'ar';
   const signalCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1654,6 +1663,22 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
               <span className="text-xs font-bold text-rose-400">{isAr ? 'تعامد خطير 90°' : 'High T-Bone 90°'}</span>
             </div>
           </div>
+          {signalPlanningDelaySec !== undefined && signalPlanningQueueM !== undefined && (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono"
+              title={
+                isAr
+                  ? 'المرجع التحليلي يوزع تأخير ويبستر/HCM على كامل الطلب وفي تحليل 15 دقيقة، بينما القياس الحي يجمع زمن الرحلة الفعلي من محاكاة IDM خلال آخر دورتين إشاريتين.'
+                  : 'The analytical reference applies Webster/HCM delay to the full demand over a 15-minute analysis period; the live sample measures actual IDM journey delay over the last two signal cycles.'
+              }
+            >
+              <span className="text-slate-400">
+                {isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}
+              </span>
+              <span>{signalPlanningDelaySec.toFixed(1)} s/veh</span>
+              <span>{Math.round(signalPlanningQueueM)} m</span>
+            </div>
+          )}
         </div>
 
         {/* U-turn panel */}
@@ -1720,6 +1745,22 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
               </span>
             </div>
           </div>
+          {uturnPlanningDelaySec !== undefined && uturnPlanningQueueM !== undefined && (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono"
+              title={
+                isAr
+                  ? 'المرجع التحليلي يوزع زمن الدوران والالتقاء على كامل الطلب المحوّل، بينما القياس الحي يتابع زمن رحلة المركبات التي دخلت محور الدوران فعلياً.'
+                  : 'The analytical reference weights detour and weaving time across all diverted demand; the live sample follows only vehicles that actually entered the U-turn axis.'
+              }
+            >
+              <span className="text-slate-400">
+                {isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}
+              </span>
+              <span>{uturnPlanningDelaySec.toFixed(1)} s/veh</span>
+              <span>{Math.round(uturnPlanningQueueM)} m</span>
+            </div>
+          )}
         </div>
       </div>
 

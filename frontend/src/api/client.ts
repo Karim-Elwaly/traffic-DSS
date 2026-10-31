@@ -1,7 +1,8 @@
 /**
- * Typed API Client for IT-DSS with built-in deterministic mathematical fallback.
- * Guarantees that the UI runs smoothly either against the FastAPI backend
- * or as a self-contained offline executive demo.
+ * Typed API Client for IT-DSS.
+ * Analytical results come from the FastAPI backend; only the corridor list has
+ * a static bootstrap fallback so the shell can render before the API responds.
+ * No simulation KPI is fabricated client-side.
  */
 
 export interface CorridorSummary {
@@ -218,6 +219,7 @@ export interface ShockwaveSOP {
 
 export interface ShockwaveResponse {
   corridor_id: string;
+  incident_type: string;
   arrival_flow_pce: number;
   arrival_speed_kmh: number;
   arrival_density_veh_km: number;
