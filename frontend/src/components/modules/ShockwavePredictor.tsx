@@ -303,6 +303,9 @@ export const ShockwavePredictor: React.FC<ShockwavePredictorProps> = ({
           planningQueueM={
             data.queue_progression[data.queue_progression.length - 1]?.queue_length_m
           }
+          incidentMode={true}
+          incidentType={incidentType}
+          shockwaveSpeedKmh={data.backward_shockwave_speed_kmh}
           language={language}
         />
       )}

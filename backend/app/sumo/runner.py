@@ -605,9 +605,12 @@ def _run_calibrated_micro_emulation(
         cap = s_main * gc + s_cross * max(0.15, (1.0 - gc - 16.0 / c_opt))
         vc = total_flow / max(1.0, cap)
         d_uniform = (0.5 * c_opt * ((1.0 - gc) ** 2)) / (1.0 - min(0.98, vc) * gc)
-        d_overflow = 45.0 * max(0.0, vc - 0.85) * 120.0
-        avg_delay = d_uniform + d_overflow
-        queue_m = (main_flow / 3600.0) * (c_opt * (1.0 - gc)) * (6.5 / 3.0) * (1.0 + max(0.0, vc - 0.75) * 2.2)
+        # HCM incremental delay clamping for T = 0.25h
+        term_sig = max(0.0, (vc - 1.0) ** 2 + (4.0 * vc / max(1.0, cap * 0.25)))
+        d_overflow = min(180.0, 900.0 * 0.25 * ((vc - 1.0) + math.sqrt(term_sig))) if vc > 0.8 else 0.0
+        avg_delay = max(5.0, min(240.0, d_uniform + d_overflow))
+        raw_queue = (main_flow / 3600.0) * (c_opt * (1.0 - gc)) * (6.5 / 3.0) * (1.0 + max(0.0, vc - 0.75) * 2.2)
+        queue_m = max(10.0, min(950.0, raw_queue))
         mean_spd = max(12.0, 52.0 - (vc * 32.0))
         co2_factor = 320.0  # Stop-and-go acceleration burns more fuel
 
@@ -616,8 +619,8 @@ def _run_calibrated_micro_emulation(
         p_div = (cross_flow + main_flow * turn_ratio) / total_flow
         t_detour = (2.0 * uturn_dist_m) / 13.89
         d_weave = 6.0 + 14.0 * ((total_flow / 6800.0) ** 2.1)
-        avg_delay = (p_div * t_detour * 0.55) + d_weave
-        queue_m = max(14.0, avg_delay * 1.45)
+        avg_delay = max(5.0, min(240.0, (p_div * t_detour * 0.55) + d_weave))
+        queue_m = max(10.0, min(950.0, avg_delay * 1.45))
         mean_spd = max(38.0, 72.0 - ((total_flow / 7000.0) * 22.0))
         co2_factor = 210.0  # Smooth continuous cruise minimizes emissions
 
@@ -625,8 +628,12 @@ def _run_calibrated_micro_emulation(
         q_circ = 0.42 * main_flow + 0.65 * cross_flow * (1.0 + turn_ratio)
         c_round = 3.0 * 1350.0 * math.exp(-0.00075 * q_circ)
         vc = total_flow / max(1.0, c_round)
-        avg_delay = 11.0 + (3600.0 / c_round) + 65.0 * ((max(0.0, vc - 0.75)) ** 2.2) * 100.0
-        queue_m = max(18.0, vc * 65.0 * (1.0 + max(0.0, vc - 0.85) * 4.5))
+        # HCM standard 15-minute period delay clamping
+        term_round = max(0.0, (vc - 1.0) ** 2 + (4.0 * vc / max(1.0, c_round * 0.25)))
+        d_inc_round = min(180.0, 900.0 * 0.25 * ((vc - 1.0) + math.sqrt(term_round))) if vc > 0.7 else 0.0
+        raw_round_delay = 11.0 + (3600.0 / max(1.0, c_round)) + d_inc_round
+        avg_delay = max(5.0, min(240.0, raw_round_delay))
+        queue_m = max(10.0, min(950.0, vc * 65.0 * (1.0 + min(2.5, max(0.0, vc - 0.85) * 1.5))))
         mean_spd = max(18.0, 48.0 - (vc * 26.0))
         co2_factor = 245.0
 

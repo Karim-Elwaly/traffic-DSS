@@ -33,11 +33,35 @@ from backend.app.core.shockwave_engine import (
 from backend.app.core.reversible_engine import (
     evaluate_reversible_corridor,
 )
+from backend.app.core.weather_engine import (
+    evaluate_weather_protocol,
+)
+from backend.app.core.checkpoint_engine import (
+    evaluate_checkpoint_optimizer,
+)
+from backend.app.core.diversion_engine import (
+    evaluate_diversion_balancer,
+)
+from backend.app.core.ramp_engine import (
+    evaluate_ramp_metering,
+)
+from backend.app.core.defect_roi_engine import (
+    evaluate_defect_prioritization,
+)
+from backend.app.core.surge_engine import (
+    evaluate_surge_orchestration,
+)
 from backend.app.models.schemas import (
     WorkZoneRequest,
     IntersectionRequest,
     ShockwaveRequest,
     ReversibleRequest,
+    WeatherRequest,
+    CheckpointRequest,
+    DiversionRequest,
+    RampMeteringRequest,
+    DefectRoiRequest,
+    SurgeOrchestratorRequest,
 )
 
 
@@ -515,3 +539,174 @@ def test_los_exact_thresholds():
     assert calculate_los(80.0, 0.5) == "E"
     assert calculate_los(80.1, 0.5) == "F"
     assert calculate_los(5.0, 1.001) == "F"
+
+
+def test_oversaturated_intersection_clamping():
+    """Verify that severe oversaturation (v/c > 1.0) does NOT explode to 159,307s or 8,370m."""
+    req = IntersectionRequest(
+        main_flow=4500,
+        cross_flow=2500,
+        turning_pct=35,
+        heavy_pct=25,
+        uturn_distance_m=800,
+        engine_mode="analytical",
+    )
+    res = simulate_intersections(req)
+    for alt in res.alternatives:
+        # HCM 15-minute incremental delay clamping ensures realistic upper bound <= 240s
+        assert 5.0 <= alt.average_delay_sec <= 240.0
+        # 95th percentile queue length bounded <= 950m
+        assert 10.0 <= alt.queue_95th_m <= 950.0
+
+
+def test_weather_protocol_engine():
+    """Verify AASHTO Stopping Sight Distance vs Fog visibility, deficit, and police convoy pacing."""
+    req = WeatherRequest(
+        corridor_id="corridor_26july",
+        visibility_m=50.0,
+        current_speed_limit_kmh=90.0,
+        road_condition="fog_slick",
+        gradient_pct=0.0,
+        traffic_flow_pce=3500.0,
+    )
+    res = evaluate_weather_protocol(req)
+    # SSD at 90 km/h is around 110m, with 50m visibility there must be a deficit
+    assert res.current_stopping_sight_distance_m > 100.0
+    assert res.stopping_distance_deficit_m > 40.0
+    assert res.safe_advisory_speed_kmh < 65.0
+    # Safe SSD must be within visibility
+    assert res.safe_stopping_sight_distance_m <= res.visibility_m + 2.0
+    # Low visibility triggers police convoy pacing SOP
+    assert res.pacing_convoy_required is True
+    assert res.convoy_speed_kmh <= 40.0
+    assert res.risk_level in ["HIGH", "CRITICAL"]
+
+
+def test_checkpoint_optimizer_engine():
+    """Verify M/M/c queuing, average delay, queue tail, and 180s green bypass trigger."""
+    # Scenario 1: Moderate flow, adequate open booths
+    req_mod = CheckpointRequest(
+        checkpoint_id="toll_km26",
+        inbound_flow_veh_per_hour=1800,
+        total_booths=8,
+        open_booths=6,
+        booth_type="mixed",
+        service_rate_per_booth_vph=350,
+        heavy_vehicle_share_pct=15,
+        target_max_wait_sec=60,
+    )
+    res_mod = evaluate_checkpoint_optimizer(req_mod)
+    assert res_mod.traffic_intensity_rho < 1.0
+    assert res_mod.green_bypass_triggered is False
+
+    # Scenario 2: Oversaturated rush, wait > 180s triggers emergency green bypass
+    req_rush = CheckpointRequest(
+        checkpoint_id="toll_km26",
+        inbound_flow_veh_per_hour=3800,
+        total_booths=8,
+        open_booths=3,
+        booth_type="manual",
+        service_rate_per_booth_vph=220,
+        heavy_vehicle_share_pct=25,
+        target_max_wait_sec=60,
+    )
+    res_rush = evaluate_checkpoint_optimizer(req_rush)
+    assert res_rush.traffic_intensity_rho > 1.0
+    assert res_rush.avg_wait_time_sec >= 180.0
+    assert res_rush.green_bypass_triggered is True
+    assert res_rush.bypass_lanes_to_open >= 2
+
+
+def test_diversion_balancer_engine():
+    """Verify BPR link travel times, Wardrop equilibrium, and VMS optimal diversion split."""
+    req = DiversionRequest(
+        total_corridor_demand_vph=7500,
+        primary_corridor_name="26th July Corridor",
+        primary_free_flow_time_min=16.0,
+        primary_capacity_vph=4500,
+        alternate_corridor_name="Rod El-Farag Axis",
+        alternate_free_flow_time_min=19.0,
+        alternate_capacity_vph=6500,
+        incident_delay_factor=1.8,
+    )
+    res = evaluate_diversion_balancer(req)
+    # Status quo without diversion experiences large primary bottleneck delay
+    assert res.do_nothing_primary_time_min > res.do_nothing_alternate_time_min
+    # Wardrop equilibrium balances travel times
+    assert res.recommended_diversion_pct > 25.0
+    assert res.time_saved_per_vehicle_min > 2.0
+    assert res.system_hours_saved_daily > 50.0
+    assert res.vms_switch_active is True
+    assert len(res.diversion_curve) == 36
+
+
+def test_ramp_metering_engine():
+    """Verify ALINEA feedback metering rate, cycle time, merge turbulence, and channelized barrier recovery."""
+    req = RampMeteringRequest(
+        corridor_id="corridor_26july",
+        mainline_flow_pce=6200.0,
+        ramp_demand_pce=1200.0,
+        heavy_pct=18.0,
+        control_mode="ALINEA_METERED",
+    )
+    res = evaluate_ramp_metering(req)
+    assert res.mainline_flow_pce == 6200.0
+    assert 300.0 <= res.metering_rate_pce_h <= 1800.0
+    assert 2.0 <= res.signal_cycle_sec <= 12.0
+    assert len(res.modes) == 3
+
+    # Uncontrolled mode should have significant capacity loss
+    uncontrolled = next(m for m in res.modes if m.mode_id == "UNCONTROLLED")
+    assert uncontrolled.capacity_loss_pct > 15.0
+
+    # ALINEA mode should yield positive throughput gain
+    metered = next(m for m in res.modes if m.mode_id == "ALINEA_METERED")
+    assert metered.throughput_gain_pct > 15.0
+    assert metered.mainline_speed_kmh >= 65.0
+
+
+def test_defect_roi_prioritizer_engine():
+    """Verify spot-crawl capacity drop, 24-hour PHD integration, and 5-defect ROI ranking."""
+    req = DefectRoiRequest(
+        corridor_id="corridor_26july",
+        defect_type="DAMAGED_EXPANSION_JOINT",
+        crawl_speed_kmh=12.0,
+        affected_lanes=2,
+        repair_hours=4.0,
+        speed_limit_kmh=80.0,
+    )
+    res = evaluate_defect_prioritization(req)
+    assert res.active_defect_capacity_pce < 8000.0
+    assert res.capacity_reduction_pct > 20.0
+    assert res.daily_wasted_phd > 1000.0
+    assert res.roi_phd_per_repair_hour > 0.0
+    assert len(res.hourly_delay_curve) == 24
+    assert len(res.corridor_defect_inventory) == 5
+
+    # Defects must be sorted by ROI score descending
+    ranks = [item.priority_rank for item in res.corridor_defect_inventory]
+    assert ranks == [1, 2, 3, 4, 5]
+    for i in range(len(res.corridor_defect_inventory) - 1):
+        assert res.corridor_defect_inventory[i].roi_phd_per_repair_hour >= res.corridor_defect_inventory[i + 1].roi_phd_per_repair_hour
+
+
+def test_surge_orchestration_engine():
+    """Verify 180-minute timeline, peak v/c flattening, and clearance time reduction under staggered release."""
+    req = SurgeOrchestratorRequest(
+        corridor_id="corridor_26july",
+        event_type="STADIUM_EGRESS",
+        surge_vehicles=6000,
+        base_corridor_flow_pce=3500.0,
+        stagger_minutes=30,
+        enable_express_chute=True,
+    )
+    res = evaluate_surge_orchestration(req)
+    assert len(res.timeline) == 19  # 0 to 180 in step 10 min
+    assert res.uncontrolled_peak_vc > res.staggered_peak_vc
+    assert res.staggered_clearance_min < res.uncontrolled_clearance_min
+    assert res.clearance_time_saved_min >= 15
+    assert res.aggregate_delay_reduction_pct > 20.0
+    assert len(res.gate_playbook_en) == 5
+    assert len(res.gate_playbook_ar) == 5
+
+

@@ -20,6 +20,12 @@ export const translations = {
     corridor_ring: "Ring Road - Giza Sector",
     corridor_salah_salem: "Salah Salem Axis",
 
+    // Pillars
+    pillar_1: "Pillar 1: Infrastructure & Capacity",
+    pillar_2: "Pillar 2: Crisis, Weather & Bottlenecks",
+    pillar_3: "Pillar 3: Strategic & Crowd Planning",
+    pillar_cv: "Live Telemetry & Sensors",
+
     // Navigation
     nav_workzone: "Work-Zone Advisor",
     nav_workzone_desc: "Optimal closure windows, capacity drop & SOP",
@@ -29,6 +35,20 @@ export const translations = {
     nav_shockwave_desc: "LWR backward wave speed & exit spillback",
     nav_reversible: "Dynamic Reversible Lanes",
     nav_reversible_desc: "5+3 barrier reallocation & Green Wave flush",
+    nav_weather: "Fog & Weather Protocol",
+    nav_weather_desc: "AASHTO SSD, safe speed & police convoy pacing",
+    nav_ramp: "Smart On-Ramp Metering",
+    nav_ramp_desc: "ALINEA feedback, merge drop & 180m barrier",
+    nav_diversion: "Parallel Corridor Balancer",
+    nav_diversion_desc: "BPR Wardrop equilibrium & dynamic VMS diversion",
+    nav_checkpoint: "Toll & Checkpoint Optimizer",
+    nav_checkpoint_desc: "M/M/c queuing, booth allocation & 180s green bypass",
+    nav_defect: "Bridge Joint & Defect ROI",
+    nav_defect_desc: "Spot-crawl capacity drop & 24h wasted PHD",
+    nav_surge: "Mega-Event & School Surge",
+    nav_surge_desc: "Staggered release, express chute & gate SOP",
+    nav_telemetry_cv: "Historical Telemetry & Live CV",
+    nav_telemetry_cv_desc: "Lane-by-lane breakdown, transit flow & YOLO CCTV",
 
     // Common Controls & Badges
     run_simulation: "Execute Decision Engine",
@@ -154,6 +174,12 @@ export const translations = {
     corridor_ring: "الطريق الدائري - قطاع الجيزة",
     corridor_salah_salem: "محور صلاح سالم (مصر الجديدة - العاصمة)",
 
+    // Pillars
+    pillar_1: "المحور 1: إدارة البنية التحتية والسعة اليومية",
+    pillar_2: "المحور 2: الأزمات والطقس واحتواء الاختناقات",
+    pillar_3: "المحور 3: التخطيط الهندسي وتفويج الحشود",
+    pillar_cv: "المجسات والتحليل الميداني",
+
     // Navigation
     nav_workzone: "إدارة التحويلات والعمليات",
     nav_workzone_desc: "تحديد الفترات المثلى للصيانة وأوامر التشغيل",
@@ -163,6 +189,20 @@ export const translations = {
     nav_shockwave_desc: "حساب سرعة ارتداد الموجة وزمن إغلاق المخارج",
     nav_reversible: "الحارات الترددية والموجة الخضراء",
     nav_reversible_desc: "إعادة توزيع الحارات (5+3) ومزامنة الإشارات",
+    nav_weather: "بروتوكول الشبورة والطقس",
+    nav_weather_desc: "مسافات التوقف الآمن (SSD) والتفويج المروري الأمني",
+    nav_ramp: "التحكم في إشارات ومطالع الكباري",
+    nav_ramp_desc: "خوارزمية ALINEA وحاجز التوجيه الخرساني 180م",
+    nav_diversion: "موازنة وتحويل المحاور البديلة",
+    nav_diversion_desc: "توازن واردروب (BPR) والتحويل الذكي عبر لوحات VMS",
+    nav_checkpoint: "بوابات الرسوم ونقاط التفتيش",
+    nav_checkpoint_desc: "نماذج M/M/c وتجاوز طابور 180 ثانية الأخضر",
+    nav_defect: "فواصل الكباري وعيوب الرصف",
+    nav_defect_desc: "هبوط سرعة الزحف وعائد إصلاح الفواصل وساعات التأخير",
+    nav_surge: "تفويج الفعاليات وذروة المدارس",
+    nav_surge_desc: "التفويج المرحلي للبوابات والمسار السريع للأقماع",
+    nav_telemetry_cv: "التحليل التاريخي وكاميرات المراقبة",
+    nav_telemetry_cv_desc: "تفصيل الحارات، مقارنة الركاب ومحاكي YOLO للرؤية الحاسوبية",
 
     // Common Controls & Badges
     run_simulation: "تنفيذ محرك اتخاذ القرار",

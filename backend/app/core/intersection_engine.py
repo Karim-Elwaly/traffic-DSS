@@ -35,8 +35,10 @@ MAIN_SATURATION_PER_LANE = 1900.0
 CROSS_SATURATION_PER_LANE = 1800.0
 LOST_TIME_SEC = 16.0
 ANALYSIS_PERIOD_H = 0.25  # 15-minute HCM analysis period
-MAX_DELAY_SEC = 300.0
+MAX_DELAY_SEC = 240.0
+MIN_DELAY_SEC = 5.0
 MAX_QUEUE_M = 500.0
+MIN_QUEUE_M = 10.0
 JAM_SPACING_M = 7.5
 PEAK_DIRECTION_SHARE = 0.55
 DEFAULT_UPSTREAM_STORAGE_M = 500.0
@@ -49,7 +51,13 @@ def clamp(val: float, min_val: float, max_val: float) -> float:
 def _bounded_delay(value: float) -> float:
     if not math.isfinite(value):
         return MAX_DELAY_SEC
-    return clamp(value, 0.0, MAX_DELAY_SEC)
+    return clamp(value, MIN_DELAY_SEC, MAX_DELAY_SEC)
+
+
+def _bounded_queue(value: float) -> float:
+    if not math.isfinite(value):
+        return MAX_QUEUE_M
+    return clamp(value, MIN_QUEUE_M, MAX_QUEUE_M)
 
 
 def _uniform_delay(cycle_sec: float, green_sec: float, vc: float) -> float:
@@ -69,7 +77,8 @@ def _incremental_delay(capacity: float, vc: float) -> float:
     term = (vc - 1.0) ** 2 + (
         8.0 * k * i * vc / max(1.0, capacity * ANALYSIS_PERIOD_H)
     )
-    return 900.0 * ANALYSIS_PERIOD_H * ((vc - 1.0) + math.sqrt(max(0.0, term)))
+    inc = 900.0 * ANALYSIS_PERIOD_H * ((vc - 1.0) + math.sqrt(max(0.0, term)))
+    return clamp(inc, 0.0, MAX_DELAY_SEC)
 
 
 def simulate_intersections(inputs: IntersectionRequest) -> IntersectionResponse:

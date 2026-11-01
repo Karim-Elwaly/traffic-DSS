@@ -14,35 +14,38 @@ A full-stack, production-grade **Intelligent Traffic Decision Support System (IT
 1. **Deterministic Traffic Flow Physics (Zero Placeholders):**
    - **PCE Flow & Human Occupancy:** Dynamically calculates Passenger Car Equivalents and human passenger flows across 5 vehicle classes (Cars, 14-Seat Microbuses, Transit Buses, Heavy Trucks, Motorcycles).
    - **Level of Service (LoS A-F):** Automated grading based on delay ($d$) and volume-to-capacity ($v/c$).
-2. **4 Executive Decision Support Modules:**
-   - **Module 1 (Work-Zone Advisor):** 168-hour maintenance optimizer ranking the Top 3 optimal closure windows minimizing Person-Hours of Delay (PHD), calculating storage-bounded queues, Little's-law delay, merge/lane/taper geometry, and bilingual Standard Operating Procedures (SOP).
-   - **Module 2 (Intersection Simulator):** Side-by-side evaluation of 4 geometric alternatives:
-     1. Uncontrolled Open Intersection (32 conflict points)
-     2. Webster's Adaptive 4-Phase Traffic Signal (8 conflict points)
-     3. Closed Median + Protected U-Turn Corridor (4 conflict points - Egyptian Axis Model)
-     4. Modern 3-Lane Roundabout (8 conflict points)
+2. **10 Executive Decision Support Modules:**
+   - **Module 1 (Work-Zone & Lane Closure Advisor):** 168-hour maintenance optimizer ranking optimal closure windows minimizing Person-Hours of Delay (PHD), calculating storage-bounded queues, Little's-law delay, merge/lane/taper geometry, and bilingual Standard Operating Procedures (SOP).
+   - **Module 2 (Corridor Signal & U-Turn Coordinator):** Side-by-side evaluation of 4 geometric alternatives: Uncontrolled Open, Webster Adaptive 4-Phase Signal, Closed Median + Protected U-Turn Corridor (Egyptian Axis Model), and Modern 3-Lane Roundabout.
    - **Module 3 (Incident Shockwave Predictor):** LWR backward shockwave propagation speed ($w$ km/h), urgent countdown to upstream exit blockage ($T_{\text{block}}$ minutes), 60-minute queue progression curve, and micro-friction remedies.
-   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel-time-derived delay savings, and Green Wave progression offsets whose spacing is derived from the actual corridor length and node count (1.70 km for the default 8.5 km / 5-node corridor).
+   - **Module 4 (Dynamic Reversible Lanes & Green Wave):** Directional split analysis comparing standard 4+4 vs 5+3 movable-barrier allocation, travel-time delay savings, and Green Wave progression offset coordination.
+   - **Module 5 (Severe Weather & Fog Protocol Advisor):** AASHTO Stopping Sight Distance (SSD) for cars vs trucks under wet/foggy conditions, tire-pavement friction modeling, pileup risk indices, and 3-Tier Police Convoy Pacing (تفويج مروري).
+   - **Module 6 (Smart On-Ramp Metering & Merge Controller):** ALINEA feedback regulation law, merge turbulence capacity drop alleviation, and 180m channelized barrier curb optimization.
+   - **Module 7 (Parallel Corridor Diversion Balancer):** Bureau of Public Roads (BPR) link performance functions, 36-point sweep curves, Wardrop User Equilibrium split %, and dynamic VMS rerouting advisories.
+   - **Module 8 (Security Checkpoint & Toll Plaza Optimizer):** Funnel queuing physics $M(t)/M(t)/c$, dynamic booth allocation, and the 180-Second Anti-Gridlock Green Bypass trigger.
+   - **Module 9 (Bridge Joint & Surface Defect ROI Prioritizer):** Spot-crawl capacity reduction model, 24-hour diurnal delay integration (PHD), and ROI ranking (delay saved per maintenance hour).
+   - **Module 10 (Mega-Event & School Peak Surge Orchestrator):** Gaussian surge modeling, peak-shaving staggered release waves, coned express chute allocation, and minute-by-minute gate playbook.
 3. **Live 60fps Microscopic Canvases:**
-   - `HighwayCanvas.tsx`: seeded Poisson arrivals (PCE-calibrated vehicle mix), IDM car-following, mandatory work-zone merge, global upstream storage metering, per-lane PCE capacity meters, and measured flow/queue/delay/speed. A visible analytical reference line shows the corresponding planning delay and queue.
-   - `IntersectionCanvas.tsx`: Webster-timed 4-phase signal vs protected U-Turn corridor, IDM car-following, right-turn Bezier geometry with right-turn-on-red, measured KPIs over two signal cycles, and an HCM/Webster analytical reference strip for each panel.
-   - Both canvases run an independent deterministic browser-side microsimulation; they are not SUMO renders, publish `—` during warm-up, and never display fabricated telemetry.
+   - Interactive HTML5 Canvas engines for Work-Zone Merging, 4-Way Intersection Alternatives, Reversible Barrier Flow, Fog Braking Cone & Patrol Convoy, Ramp ALINEA Metering, Diversion Fork BPR, and Toll Plaza Funneling.
 4. **Bilingual Executive Readiness (RTL / LTR):** Instant toggle between English (LTR) and Egyptian / Standard Arabic (RTL) with dynamic `dir="rtl"` layout switching.
 5. **Real-time Edge CV Ingestion Webhook:** `POST /api/cv/ingest` ready for YOLOv8/v11 + ByteTrack camera feeds.
 
 ---
 
-## 📐 System Architecture & Algorithm Blueprint
+## 📐 Complete 10-Module Functional Matrix
 
-For deep technical derivations and pseudocode, consult [ARCHITECTURE.md](file:///d:/projects/traffic_dss/ARCHITECTURE.md) and [ALGORITHMS.md](file:///d:/projects/traffic_dss/ALGORITHMS.md). Below is a summary of the core modules:
-
-| Module | Core Physics & Algorithm | Primary Output |
-| :--- | :--- | :--- |
-| **PCE & Occupancy** | $q_{\text{PCE}} = \sum N_k \cdot w_k$, $P_{\text{pax}} = \sum N_k \cdot O_k$ | Homogenized flow & human throughput |
-| **Module 1: Work-Zone** | $C_{\text{wz}} = 2000 \cdot n_{\text{open}} \cdot \max(0.40,1-0.06n_{\text{closed}}) \cdot f_{\text{lane}}$, storage-bounded queue and Little's-law delay, 168h optimizer | Top 3 optimal windows, buffer/taper, field SOP |
-| **Module 2: Intersection** | Webster cycle/green splits, HCM uniform + incremental delay, protected U-turn detour/weave delay, roundabout entry capacity | 4-way comparison matrix & winning recommendation |
-| **Module 3: Shockwave** | LWR wave velocity $w = \Delta q / \Delta k$, 6.5 m jam density, capped exit-blockage countdown | Speed gauge, red countdown, 60-min queue trajectory |
-| **Module 4: Reversible** | Split ratio $>68\%$ with outbound 4+4 v/c $<0.45$, travel-time delay, Green Wave offsets $\Delta t = D/V_{\text{prog}}$ with geometric spacing | 4+4 vs 5+3 comparison, Green Wave schedule |
+| # | Module Name | Operational Focus | Core Physics & Algorithm | Primary Field Output |
+| :-: | :--- | :--- | :--- | :--- |
+| **1** | **Work-Zone & Lane Closure Advisor** | Capacity & Maintenance | HCM Work-Zone Drop, Merge Friction ($f_{\text{merge}}$), 168-Hour PHD Minimizer | Top 3 optimal windows, cone taper geometry, SOP |
+| **2** | **Corridor Signal & Green Wave** | Intersections & U-Turns | Webster delay, HCM incremental overflow, U-turn weaving penalty | 4-way comparison matrix, conflict point audit |
+| **3** | **Incident Shockwave Predictor** | Incident Management | LWR Hydrodynamic Shockwave $w = \Delta q / \Delta k$, exit blockage countdown | Exit blockage timer, queue trajectory, warning trailer placement |
+| **4** | **Reversible Lane Operator** | Tidal Flow Management | Directional split $>68\%$, 5+3 barrier reallocation, Green Wave offsets | Barrier reallocation order, signal flush offsets |
+| **5** | **Severe Weather & Fog Advisor** | Crisis & Wet Weather | AASHTO SSD $d = 0.278Vt + V^2 / (254(\mu \pm G))$, Pileup Risk Index | Safe advisory speed, VMS alert, police convoy pacing (تفويج) |
+| **6** | **Ramp Metering & Merge Assistant**| On-Ramp Bottlenecks | ALINEA feedback law, merge turbulence recovery, 180m barrier curb | Cycle time, metering rate, barrier length recommendation |
+| **7** | **Parallel Corridor Balancer** | Network Rerouting | BPR curves $T = t_0[1 + 0.15(v/c)^4]$, Wardrop User Equilibrium | Optimal split %, travel time parity, VMS advisory broadcast |
+| **8** | **Security & Toll Optimizer** | Plaza Bottlenecks | $M/M/c$ queuing theory, queue backpressure, 180s Green Bypass | Optimal booth count, RFID allocation, bypass gate trigger |
+| **9** | **Bridge Joint & Defect ROI** | Infrastructure Maintenance | Spot-crawl speed drop, 24h diurnal PHD integration, ROI ranking | Defect priority rank, nocturnal repair window, delay savings |
+| **10**| **Mega-Event Surge Orchestrator** | Stadium & School Peaks | Gaussian dispersion, staggered wave release, coned express chute | Stagger schedule, clearance time saved, gate playbook |
 
 ---
 
@@ -69,19 +72,25 @@ traffic-dss-platform/
 │   │   │   ├── workzone_engine.py     # Module 1: Window Optimizer & SOP
 │   │   │   ├── intersection_engine.py # Module 2: 4-Way Geometric Simulator
 │   │   │   ├── shockwave_engine.py    # Module 3: LWR Shockwave & Micro-Friction
-│   │   │   └── reversible_engine.py   # Module 4: 5+3 Reversible & Green Wave
+│   │   │   ├── reversible_engine.py   # Module 4: 5+3 Reversible & Green Wave
+│   │   │   ├── weather_engine.py      # Module 5: AASHTO Fog SSD & Convoy Pacing
+│   │   │   ├── ramp_engine.py         # Module 6: ALINEA Ramp Metering & Merge Barrier
+│   │   │   ├── diversion_engine.py    # Module 7: BPR Parallel Corridor Balancer
+│   │   │   ├── checkpoint_engine.py   # Module 8: Toll & Checkpoint Funnel Optimizer
+│   │   │   ├── defect_roi_engine.py   # Module 9: Bridge Joint & Defect ROI Prioritizer
+│   │   │   └── surge_engine.py        # Module 10: Mega-Event & School Surge Orchestrator
 │   │   ├── services/
 │   │   │   ├── synthetic_seeder.py    # Pre-seeds 3 Egyptian Corridors x 7d x 24h
 │   │   │   └── cv_ingestion.py        # Live YOLO/ByteTrack webhook
 │   │   ├── sumo/
-│   │   │   ├── networks/              # 5 SUMO networks XML (4 intersections + 4-lane highway) & base.sumocfg
-│   │   │   ├── generator.py           # Multi-class heterogeneous vehicle & route generator
-│   │   │   ├── runner.py              # TraCI runtime execution & microscopic metric extractor
+│   │   │   ├── networks/              # 5 SUMO networks XML & base.sumocfg
+│   │   │   ├── generator.py           # Multi-class heterogeneous vehicle generator
+│   │   │   ├── runner.py              # TraCI runtime execution & metric extractor
 │   │   │   └── service.py             # Hybrid Digital Twin orchestrator & fallback
 │   │   └── api/
 │   │       └── routes.py              # REST API endpoints (HCM + SUMO Digital Twin)
 │   └── tests/
-│       ├── test_engines.py            # Pytest suite for math engines
+│       ├── test_engines.py            # Pytest suite for mathematical engines
 │       ├── test_api.py                # FastAPI TestClient integration tests
 │       └── test_sumo.py               # SUMO TraCI & microscopic simulation test suite
 └── frontend/
@@ -94,22 +103,34 @@ traffic-dss-platform/
         ├── i18n/
         │   └── translations.ts        # Full Arabic (RTL) & English (LTR) dictionary
         ├── api/
-        │   └── client.ts              # Typed API client + corridor bootstrap fallback
+        │   └── client.ts              # Typed API client with 10-module endpoints
         ├── components/
         │   ├── layout/
         │   │   ├── TopCommandBar.tsx  # Corridor selector, AR/EN toggle, Status
-        │   │   └── SidebarNav.tsx     # 4 DSS Module Navigation
+        │   │   └── SidebarNav.tsx     # 10 DSS Module Navigation across 3 Pillars
         │   ├── simulation/
-        │   │   ├── HighwayCanvas.tsx      # 60fps 4-lane Highway micro-simulator
-        │   │   └── IntersectionCanvas.tsx # Split-screen Signal vs U-Turn simulator
+        │   │   ├── HighwayCanvas.tsx          # 60fps Work-Zone micro-simulator
+        │   │   ├── IntersectionCanvas.tsx     # Split-screen Signal vs U-Turn simulator
+        │   │   ├── ReversibleCanvas.tsx       # 5+3 Tidal flow reversible lane canvas
+        │   │   ├── WeatherBrakingCanvas.tsx   # Fog SSD braking cone & police convoy
+        │   │   ├── RampMergeCanvas.tsx        # ALINEA ramp metering & merge barrier
+        │   │   ├── DiversionForkCanvas.tsx    # Parallel corridor BPR bifurcation
+        │   │   └── CheckpointFunnelCanvas.tsx # Toll plaza queue & green bypass funnel
         │   ├── common/
-        │   │   ├── KpiCard.tsx            # Operations-grade KPI badge card
-        │   │   └── SopActionCard.tsx      # Printable/Copyable Standard Operating Procedure
+        │   │   ├── KpiCard.tsx                # Operations-grade KPI badge card
+        │   │   └── SopActionCard.tsx          # Printable/Copyable SOP card
         │   └── modules/
-        │       ├── WorkZoneAdvisor.tsx       # Module 1 Dashboard
-        │       ├── IntersectionSimulator.tsx # Module 2 Dashboard
-        │       ├── ShockwavePredictor.tsx    # Module 3 Dashboard
-        │       └── ReversiblePlanner.tsx     # Module 4 Dashboard
+        │       ├── WorkZoneAdvisor.tsx        # Module 1 Dashboard
+        │       ├── IntersectionSimulator.tsx  # Module 2 Dashboard
+        │       ├── ShockwavePredictor.tsx     # Module 3 Dashboard
+        │       ├── ReversiblePlanner.tsx      # Module 4 Dashboard
+        │       ├── WeatherProtocolAdvisor.tsx # Module 5 Dashboard
+        │       ├── RampMergeController.tsx    # Module 6 Dashboard
+        │       ├── DiversionBalancer.tsx      # Module 7 Dashboard
+        │       ├── CheckpointOptimizer.tsx    # Module 8 Dashboard
+        │       ├── DefectPrioritizer.tsx      # Module 9 Dashboard
+        │       ├── SurgeOrchestrator.tsx      # Module 10 Dashboard
+        │       └── TelemetryCvInspector.tsx   # Live CCTV CV Telemetry Inspector
 ```
 
 ---

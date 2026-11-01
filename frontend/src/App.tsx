@@ -6,6 +6,13 @@ import { WorkZoneAdvisor } from './components/modules/WorkZoneAdvisor';
 import { IntersectionSimulator } from './components/modules/IntersectionSimulator';
 import { ShockwavePredictor } from './components/modules/ShockwavePredictor';
 import { ReversiblePlanner } from './components/modules/ReversiblePlanner';
+import { TelemetryCvInspector } from './components/modules/TelemetryCvInspector';
+import { WeatherProtocolAdvisor } from './components/modules/WeatherProtocolAdvisor';
+import { CheckpointOptimizer } from './components/modules/CheckpointOptimizer';
+import { DiversionBalancer } from './components/modules/DiversionBalancer';
+import { RampMergeController } from './components/modules/RampMergeController';
+import { DefectPrioritizer } from './components/modules/DefectPrioritizer';
+import { SurgeOrchestrator } from './components/modules/SurgeOrchestrator';
 import { CorridorSummary, fetchCorridors, FALLBACK_CORRIDORS } from './api/client';
 import { Language } from './i18n/translations';
 
@@ -85,6 +92,49 @@ export const App: React.FC = () => {
 
           {activeModule === 'reversible' && (
             <ReversiblePlanner
+              corridorId={selectedCorridorId}
+              language={language}
+            />
+          )}
+
+          {activeModule === 'telemetry_cv' && (
+            <TelemetryCvInspector
+              corridorId={selectedCorridorId}
+              language={language}
+            />
+          )}
+
+          {activeModule === 'weather' && (
+            <WeatherProtocolAdvisor
+              corridorId={selectedCorridorId}
+              language={language}
+            />
+          )}
+
+          {activeModule === 'checkpoint' && (
+            <CheckpointOptimizer language={language} />
+          )}
+
+          {activeModule === 'diversion' && (
+            <DiversionBalancer language={language} />
+          )}
+
+          {activeModule === 'ramp' && (
+            <RampMergeController
+              corridorId={selectedCorridorId}
+              language={language}
+            />
+          )}
+
+          {activeModule === 'defect' && (
+            <DefectPrioritizer
+              corridorId={selectedCorridorId}
+              language={language}
+            />
+          )}
+
+          {activeModule === 'surge' && (
+            <SurgeOrchestrator
               corridorId={selectedCorridorId}
               language={language}
             />

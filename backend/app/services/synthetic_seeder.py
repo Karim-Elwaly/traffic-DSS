@@ -67,46 +67,78 @@ CORRIDOR_METADATA = [
 ]
 
 
+# Authoritative 24-hour 4-lane directional hourly flow rate targets (PCE/h):
+# Night (00:00 - 05:00): 900 to 1,800 PCE/h total across 4 lanes.
+# Morning Peak (07:00 - 10:00): 6,200 to 7,400 PCE/h total.
+# Midday (11:00 - 13:00): 4,500 to 5,400 PCE/h total.
+# Afternoon Peak (14:00 - 18:00): 6,500 to 7,600 PCE/h total.
+# Evening (19:00 - 23:00): 3,200 to 5,200 PCE/h total (higher on Thursday night).
+BASE_HOURLY_PCE = [
+    1450.0, 1200.0, 980.0, 920.0, 1150.0, 1650.0,   # 00 - 05: Night (920 - 1,650 PCE/h)
+    3500.0, 6300.0, 7300.0, 6800.0, 6250.0, 4850.0,  # 06 - 11: Morning Peak (6,250 - 7,300 PCE/h)
+    4650.0, 5200.0, 6600.0, 7500.0, 7200.0, 6600.0,  # 12 - 17: Midday (4,650 - 5,200) & Afternoon Peak (6,600 - 7,500)
+    6400.0, 4600.0, 4200.0, 3700.0, 3300.0, 3000.0,  # 18 - 23: Afternoon Peak (18) & Evening (19 - 23)
+]
+
+
 def _get_hourly_demand_factor(hour: int, day_of_week: int) -> float:
     """
-    Returns normalized hourly demand factor (0.15 to 1.0).
-    Captures:
-    - Morning rush (07:00 - 10:00)
-    - Afternoon peak (14:00 - 18:00)
-    - Thursday night weekend surge (20:00 - 01:00) (day 4)
-    - Friday prayer & evening leisure pattern (day 5)
+    Returns normalized hourly demand factor (0.10 to 1.0).
     """
-    # Base diurnal profile
-    base_curve = [
-        0.22, 0.16, 0.12, 0.11, 0.15, 0.28,  # 00 - 05
-        0.58, 0.90, 0.98, 0.88, 0.72, 0.68,  # 06 - 11
-        0.65, 0.70, 0.85, 0.95, 0.92, 0.84,  # 12 - 17
-        0.80, 0.82, 0.86, 0.78, 0.60, 0.38,  # 18 - 23
-    ]
-    factor = base_curve[hour]
+    base_factor = BASE_HOURLY_PCE[hour] / 9000.0
 
     # Thursday (day 4): weekend-eve evening surge extending into the night
     if day_of_week == 4 and 19 <= hour <= 23:
-        factor = min(1.0, factor * 1.35)
+        base_factor = min(1.0, base_factor * 1.15)
 
-    # Friday (day 5): lower morning rush, heavy afternoon and late-night surge
+    # Friday (day 5): lower morning rush, moderate afternoon/evening
     if day_of_week == 5:
         if 6 <= hour <= 11:
-            factor *= 0.45
+            base_factor *= 0.55
         elif 14 <= hour <= 22:
-            factor = min(1.0, factor * 1.15)
-        elif 0 <= hour <= 1:
-            factor = min(1.0, factor * 1.50)
+            base_factor = min(1.0, base_factor * 1.05)
 
-    return factor
+    return base_factor
+
+
+def get_corridor_hourly_target_pce(hour: int, day_of_week: int, multiplier: float = 1.0) -> float:
+    """
+    Computes strict 4-lane directional hourly flow rate (PCE/h) calibrated to:
+    - Night (00:00 - 05:00): 900 to 1,800 PCE/h total
+    - Morning Peak (07:00 - 10:00): 6,200 to 7,400 PCE/h total
+    - Midday (11:00 - 13:00): 4,500 to 5,400 PCE/h total
+    - Afternoon Peak (14:00 - 18:00): 6,500 to 7,600 PCE/h total
+    - Evening (19:00 - 23:00): 3,200 to 5,200 PCE/h total (higher on Thursday night)
+    """
+    val = BASE_HOURLY_PCE[hour]
+    if day_of_week == 4 and 19 <= hour <= 23:
+        val = min(5200.0, val * 1.15)
+    elif day_of_week == 5:
+        if 6 <= hour <= 11:
+            val *= 0.58
+        elif 14 <= hour <= 22:
+            val = min(6800.0, val * 1.04)
+
+    target = val * multiplier
+    if 0 <= hour <= 5:
+        target = max(900.0, min(1800.0, target))
+    elif 7 <= hour <= 10:
+        target = max(6200.0, min(7400.0, target))
+    elif 11 <= hour <= 13:
+        target = max(4500.0, min(5400.0, target))
+    elif 14 <= hour <= 18:
+        target = max(6500.0, min(7600.0, target))
+    elif 19 <= hour <= 23:
+        target = max(3200.0, min(5200.0, target))
+
+    return round(target, 1)
 
 
 def _allocate_largest_remainder(total: int, weights: List[float]) -> List[int]:
     """
     Splits ``total`` into integer counts proportional to ``weights`` using the
     largest-remainder method. The returned counts always sum exactly to
-    ``total``, so a lane can never contain more vehicles than its intended
-    hourly volume.
+    ``total``.
     """
     total = max(0, int(total))
     positive = [max(0.0, float(w)) for w in weights]
@@ -129,12 +161,31 @@ def _allocate_largest_remainder(total: int, weights: List[float]) -> List[int]:
 
 def seed_corridors_and_telemetry(session: Session) -> None:
     """
-    Checks if database already has corridors; if not, seeds all 3 corridors
-    and their 7-day x 24-hour per-lane telemetry.
+    Seeds all 3 corridors and their 7-day x 24-hour per-lane telemetry.
+    Verifies that existing data matches the calibrated 4-lane flow rates;
+    if stale or corrupted (e.g. cumulative sums > 10,000 PCE/h), cleans and reseeds.
     """
-    existing = session.exec(select(Corridor)).first()
-    if existing:
-        return  # Already seeded
+    existing_corridors = session.exec(select(Corridor)).all()
+    existing_records = session.exec(select(HourlyTelemetry)).all()
+
+    # Verify existing database health: must have 3 corridors, exactly 2016 rows,
+    # and realistic non-monotonically climbing demand.
+    if len(existing_corridors) == len(CORRIDOR_METADATA) and len(existing_records) == 2016:
+        # Check hour 23 demand on corridor 26 July: should be ~3,300 PCE/h, NOT 60,000!
+        h23_records = [
+            r for r in existing_records
+            if r.corridor_id == "corridor_26july" and r.day_of_week == 0 and r.hour == 23
+        ]
+        h23_sum = sum(r.pce_flow for r in h23_records)
+        if 2000.0 <= h23_sum <= 4500.0:
+            return  # Already clean and authoritative!
+
+    # Clean stale / duplicated tables
+    for r in existing_records:
+        session.delete(r)
+    for c in existing_corridors:
+        session.delete(c)
+    session.commit()
 
     # 1. Insert Corridors
     for meta in CORRIDOR_METADATA:
@@ -166,7 +217,6 @@ def seed_corridors_and_telemetry(session: Session) -> None:
         for day in range(7):  # 0 to 6
             for hour in range(24):
                 demand_factor = _get_hourly_demand_factor(hour, day)
-                # Total hourly vehicular demand across corridor (ranges between 1200 and 7200 veh/h)
                 total_corridor_veh = int(6200.0 * demand_factor * peak_mult)
 
                 # Distribution across lanes:

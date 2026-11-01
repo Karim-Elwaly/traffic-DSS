@@ -321,3 +321,252 @@ class CVIngestResponse(BaseModel):
     telemetry_day_of_week: Optional[int] = None
     telemetry_hour: Optional[int] = None
     message: str
+
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Module 5: Weather Protocol Advisor (Fog / Shaboura & SSD)
+# ---------------------------------------------------------------------------
+
+class WeatherRequest(BaseModel):
+    corridor_id: str = "corridor_26july"
+    visibility_m: float = Field(default=80.0, ge=10.0, le=2000.0)
+    current_speed_limit_kmh: float = Field(default=80.0, ge=30.0, le=120.0)
+    road_condition: str = Field(default="WET")  # DRY, WET, FIRST_RAIN_SLICK, SANDSTORM
+    gradient_pct: float = Field(default=0.0, ge=-6.0, le=6.0)
+    traffic_flow_pce: float = Field(default=3500.0, ge=500.0, le=9000.0)
+    heavy_pct: float = Field(default=15.0, ge=0.0, le=50.0)
+
+
+class WeatherResponse(BaseModel):
+    visibility_m: float
+    road_condition: str
+    friction_coefficient: float
+    current_stopping_sight_distance_m: float
+    ssd_car_m: float
+    ssd_truck_m: float
+    safe_advisory_speed_kmh: float
+    safe_stopping_sight_distance_m: float
+    stopping_distance_deficit_m: float
+    pileup_risk_pct: float
+    protocol_tier: str  # TIER 1, TIER 2, TIER 3
+    pacing_convoy_required: bool  # تفويج مروري
+    convoy_speed_kmh: float
+    convoy_lead_vehicles_count: int
+    vms_warning_text_en: str
+    vms_warning_text_ar: str
+    police_sop_actions_en: List[str]
+    police_sop_actions_ar: List[str]
+    risk_level: str  # LOW, MODERATE, HIGH, CRITICAL
+
+
+# ---------------------------------------------------------------------------
+# Module 6: Smart On-Ramp Metering & Merge Controller
+# ---------------------------------------------------------------------------
+
+class RampMeteringRequest(BaseModel):
+    corridor_id: str = "corridor_26july"
+    mainline_flow_pce: float = Field(default=5600.0, ge=2000.0, le=7500.0)
+    ramp_demand_pce: float = Field(default=1100.0, ge=200.0, le=2200.0)
+    heavy_pct: float = Field(default=16.0, ge=5.0, le=35.0)
+    control_mode: str = Field(default="ALINEA_METERED")  # UNCONTROLLED, ALINEA_METERED, CHANNELIZED_BARRIER
+
+
+class RampModeComparison(BaseModel):
+    mode_id: str
+    mode_name_en: str
+    mode_name_ar: str
+    effective_capacity_pce: float
+    capacity_loss_pct: float
+    mainline_speed_kmh: float
+    ramp_queue_veh: float
+    ramp_delay_sec: float
+    throughput_gain_pct: float
+    level_of_service: str
+
+
+class RampMeteringResponse(BaseModel):
+    corridor_id: str
+    mainline_flow_pce: float
+    ramp_demand_pce: float
+    heavy_pct: float
+    recommended_mode: str
+    metering_rate_pce_h: float
+    signal_cycle_sec: float
+    barrier_length_m: float
+    modes: List[RampModeComparison]
+    sop_directives_en: List[str]
+    sop_directives_ar: List[str]
+    executive_summary_en: str
+    executive_summary_ar: str
+
+
+# ---------------------------------------------------------------------------
+# Module 7: Parallel Corridor Load Balancer (BPR)
+# ---------------------------------------------------------------------------
+
+class DiversionPoint(BaseModel):
+    diversion_pct: float
+    primary_time_min: float
+    alt_time_min: float
+    total_network_phd: float
+
+
+class DiversionRequest(BaseModel):
+    total_corridor_demand_vph: float = Field(default=5500.0, ge=1000.0, le=12000.0)
+    primary_corridor_name: str = "26th of July Corridor"
+    primary_free_flow_time_min: float = Field(default=14.0, ge=5.0, le=60.0)
+    primary_capacity_vph: float = Field(default=4500.0, ge=1000.0, le=8000.0)
+    alternate_corridor_name: str = "Rod El-Farag Axis"
+    alternate_free_flow_time_min: float = Field(default=16.5, ge=5.0, le=60.0)
+    alternate_capacity_vph: float = Field(default=5500.0, ge=1000.0, le=8000.0)
+    incident_delay_factor: float = Field(default=1.0, ge=1.0, le=3.0)
+
+
+class DiversionResponse(BaseModel):
+    total_demand_vph: float
+    do_nothing_primary_flow_vph: float
+    do_nothing_alternate_flow_vph: float
+    do_nothing_primary_time_min: float
+    do_nothing_alternate_time_min: float
+    optimal_primary_flow_vph: float
+    optimal_alternate_flow_vph: float
+    optimal_equilibrium_time_min: float
+    recommended_diversion_pct: float
+    time_saved_per_vehicle_min: float
+    system_hours_saved_daily: float
+    vms_switch_active: bool
+    vms_advisory_en: str
+    vms_advisory_ar: str
+    network_efficiency_gain_pct: float
+    diversion_curve: List[DiversionPoint] = []
+
+
+# ---------------------------------------------------------------------------
+# Module 8: Checkpoint & Toll Plaza Optimizer
+# ---------------------------------------------------------------------------
+
+class CheckpointRequest(BaseModel):
+    checkpoint_id: str = "toll_26july"
+    inbound_flow_veh_per_hour: float = Field(default=2800.0, ge=200.0, le=8000.0)
+    total_booths: int = Field(default=8, ge=2, le=16)
+    open_booths: int = Field(default=4, ge=1, le=16)
+    booth_type: str = Field(default="mixed")  # manual, rfid, security, mixed
+    service_rate_per_booth_vph: float = Field(default=550.0, ge=60.0, le=1200.0)
+    heavy_vehicle_share_pct: float = Field(default=12.0, ge=0.0, le=50.0)
+    target_max_wait_sec: float = Field(default=180.0, ge=30.0, le=600.0)
+
+
+class CheckpointResponse(BaseModel):
+    checkpoint_id: str
+    inbound_flow_veh_per_hour: float
+    total_booths: int
+    open_booths: int
+    optimal_open_booths: int
+    traffic_intensity_rho: float
+    avg_wait_time_sec: float
+    avg_queue_veh: float
+    queue_length_m: float
+    green_bypass_triggered: bool  # تفويج أخضر 180 ثانية
+    bypass_lanes_to_open: int
+    throughput_veh_per_hour: float
+    level_of_service: str
+    mitigation_strategy_en: str
+    mitigation_strategy_ar: str
+    booth_allocation_en: List[str]
+    booth_allocation_ar: List[str]
+
+
+# ---------------------------------------------------------------------------
+# Module 9: Bridge Joint & Surface Defect ROI Prioritizer
+# ---------------------------------------------------------------------------
+
+class DefectItem(BaseModel):
+    defect_id: str
+    defect_name_en: str
+    defect_name_ar: str
+    km_marker: str
+    defect_type: str
+    affected_lanes: int
+    crawl_speed_kmh: float
+    capacity_drop_pct: float
+    daily_wasted_phd: float
+    repair_hours: float
+    roi_phd_per_repair_hour: float
+    recommended_window: str
+    priority_rank: int
+
+
+class DefectHourlyDelay(BaseModel):
+    hour: int
+    demand_pce: float
+    defect_capacity_pce: float
+    delay_hours: float
+    wasted_phd: float
+
+
+class DefectRoiRequest(BaseModel):
+    corridor_id: str = "corridor_26july"
+    defect_type: str = Field(default="DAMAGED_EXPANSION_JOINT")  # DAMAGED_EXPANSION_JOINT, DEEP_POTHOLE_CLUSTER, ASPHALT_SUBSIDENCE
+    crawl_speed_kmh: float = Field(default=15.0, ge=5.0, le=60.0)
+    affected_lanes: int = Field(default=2, ge=1, le=4)
+    repair_hours: float = Field(default=4.0, ge=1.0, le=12.0)
+    speed_limit_kmh: float = Field(default=80.0, ge=40.0, le=120.0)
+
+
+class DefectRoiResponse(BaseModel):
+    corridor_id: str
+    defect_type: str
+    active_defect_capacity_pce: float
+    capacity_reduction_pct: float
+    daily_wasted_phd: float
+    roi_phd_per_repair_hour: float
+    hourly_delay_curve: List[DefectHourlyDelay]
+    corridor_defect_inventory: List[DefectItem]
+    recommended_night_window: str
+    sop_directives_en: List[str]
+    sop_directives_ar: List[str]
+
+
+# ---------------------------------------------------------------------------
+# Module 10: Mega-Event & School Peak Surge Orchestrator
+# ---------------------------------------------------------------------------
+
+class SurgeTimelineStep(BaseModel):
+    minute: int
+    uncontrolled_flow_vph: float
+    staggered_flow_vph: float
+    corridor_capacity_vph: float
+    uncontrolled_vc: float
+    staggered_vc: float
+    uncontrolled_queue_veh: float
+    staggered_queue_veh: float
+    delay_saved_pct: float
+
+
+class SurgeOrchestratorRequest(BaseModel):
+    corridor_id: str = "corridor_26july"
+    event_type: str = Field(default="STADIUM_EGRESS")  # STADIUM_EGRESS, SCHOOL_CLUSTER_PEAK, EXHIBITION_DISPERSAL
+    surge_vehicles: int = Field(default=4500, ge=500, le=15000)
+    base_corridor_flow_pce: float = Field(default=3800.0, ge=1000.0, le=7000.0)
+    stagger_minutes: int = Field(default=30, ge=0, le=60)  # 0, 15, 30, 45
+    enable_express_chute: bool = True
+
+
+class SurgeOrchestratorResponse(BaseModel):
+    corridor_id: str
+    event_type: str
+    surge_vehicles: int
+    uncontrolled_peak_vc: float
+    staggered_peak_vc: float
+    uncontrolled_clearance_min: int
+    staggered_clearance_min: int
+    clearance_time_saved_min: int
+    aggregate_delay_reduction_pct: float
+    max_uncontrolled_queue_m: float
+    max_staggered_queue_m: float
+    timeline: List[SurgeTimelineStep]
+    gate_playbook_en: List[str]
+    gate_playbook_ar: List[str]
+
+

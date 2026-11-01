@@ -36,10 +36,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Intelligent Traffic Decision Support System (IT-DSS) API",
     description=(
-        "Production-grade Decision Support API powered by deterministic Highway Capacity Manual (HCM), "
-        "Webster's Intersection Delay, LWR Shockwave, and Dynamic Reversible Lane physics."
+        "Production-grade Decision Support API powered by 10 deterministic traffic operations engines: "
+        "Work-Zone HCM, Webster/HCM Intersections, LWR Shockwave, Dynamic Reversible Lanes, "
+        "AASHTO Fog SSD, ALINEA Ramp Metering, BPR Diversion Balancing, M/M/c Checkpoint Funneling, "
+        "Bridge Defect ROI Prioritization, and Mega-Event Surge Dispersal."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 

@@ -32,11 +32,29 @@ from backend.app.models.schemas import (
     ReversibleResponse,
     CVIngestRequest,
     CVIngestResponse,
+    WeatherRequest,
+    WeatherResponse,
+    CheckpointRequest,
+    CheckpointResponse,
+    DiversionRequest,
+    DiversionResponse,
+    RampMeteringRequest,
+    RampMeteringResponse,
+    DefectRoiRequest,
+    DefectRoiResponse,
+    SurgeOrchestratorRequest,
+    SurgeOrchestratorResponse,
 )
 from backend.app.core.workzone_engine import optimize_workzone_schedule
 from backend.app.core.intersection_engine import simulate_intersections
 from backend.app.core.shockwave_engine import predict_incident_shockwave
 from backend.app.core.reversible_engine import evaluate_reversible_corridor
+from backend.app.core.weather_engine import evaluate_weather_protocol
+from backend.app.core.ramp_engine import evaluate_ramp_metering
+from backend.app.core.diversion_engine import evaluate_diversion_balancer
+from backend.app.core.checkpoint_engine import evaluate_checkpoint_optimizer
+from backend.app.core.defect_roi_engine import evaluate_defect_prioritization
+from backend.app.core.surge_engine import evaluate_surge_orchestration
 from backend.app.services.cv_ingestion import process_cv_feed
 from backend.app.sumo.service import run_sumo_simulation, get_sumo_system_status
 from backend.app.sumo.runner import execute_traci_workzone_sim, launch_sumo_gui
@@ -99,12 +117,17 @@ def get_corridor_telemetry(
     )
     records = session.exec(statement).all()
 
-    # Aggregate by hour
+    # Aggregate by hour with strict per-lane deduplication
     hourly_data: List[HourlyCorridorTelemetry] = []
     for h in range(24):
-        hour_lanes = [r for r in records if r.hour == h]
-        if not hour_lanes:
+        raw_lanes = [r for r in records if r.hour == h]
+        if not raw_lanes:
             continue
+
+        lane_map: dict[int, HourlyTelemetry] = {}
+        for r in raw_lanes:
+            lane_map[r.lane_number] = r
+        hour_lanes = [lane_map[ln] for ln in sorted(lane_map.keys())]
 
         tot_pce = sum(r.pce_flow for r in hour_lanes)
         tot_pax = sum(r.passenger_flow for r in hour_lanes)
@@ -176,13 +199,18 @@ def optimize_workzone(
     )
     records = session.exec(statement).all()
 
+    # Deduplicate strictly by (day_of_week, hour, lane_number)
+    deduped_records: dict[tuple[int, int, int], HourlyTelemetry] = {}
+    for r in records:
+        deduped_records[(r.day_of_week, r.hour, r.lane_number)] = r
+
     aggregates = {
         (day, hour): {"pce": 0.0, "pax": 0.0, "vehicles": 0.0, "heavy": 0.0}
         for day in range(7)
         for hour in range(24)
     }
-    for record in records:
-        bucket = aggregates[(record.day_of_week, record.hour)]
+    for (day, hour, _lane), record in deduped_records.items():
+        bucket = aggregates[(day, hour)]
         bucket["pce"] += record.pce_flow
         bucket["pax"] += record.passenger_flow
         bucket["vehicles"] += (
@@ -272,19 +300,24 @@ def simulate_workzone_sumo(payload: WorkZoneRequest, session: Session = Depends(
         .where(HourlyTelemetry.corridor_id == payload.corridor_id)
         .where(HourlyTelemetry.day_of_week == payload.day_of_week)
     ).all()
+    # Deduplicate strictly by (hour, lane_number)
+    deduped_sumo_records: dict[tuple[int, int], HourlyTelemetry] = {}
+    for record in records:
+        deduped_sumo_records[(record.hour, record.lane_number)] = record
+
     hourly_pce: dict[int, float] = {h: 0.0 for h in range(24)}
     hourly_vehicles: dict[int, float] = {h: 0.0 for h in range(24)}
     hourly_heavy: dict[int, float] = {h: 0.0 for h in range(24)}
-    for record in records:
-        hourly_pce[record.hour] += record.pce_flow
-        hourly_vehicles[record.hour] += (
+    for (hour, _lane), record in deduped_sumo_records.items():
+        hourly_pce[hour] += record.pce_flow
+        hourly_vehicles[hour] += (
             record.count_cars
             + record.count_microbus
             + record.count_buses
             + record.count_trucks
             + record.count_motorcycles
         )
-        hourly_heavy[record.hour] += record.count_buses + record.count_trucks
+        hourly_heavy[hour] += record.count_buses + record.count_trucks
 
     populated = {h: value for h, value in hourly_pce.items() if value > 0.0}
     if not populated:
@@ -395,15 +428,21 @@ def predict_shockwave(
             ),
         )
 
-    arrival_flow = sum(r.pce_flow for r in records)
-    arrival_speed = sum(r.avg_speed_kmh for r in records) / max(1, len(records))
+    # Deduplicate strictly by lane_number
+    deduped_lanes: dict[int, HourlyTelemetry] = {}
+    for r in records:
+        deduped_lanes[r.lane_number] = r
+    lane_records = [deduped_lanes[ln] for ln in sorted(deduped_lanes.keys())]
+
+    arrival_flow = sum(r.pce_flow for r in lane_records)
+    arrival_speed = sum(r.avg_speed_kmh for r in lane_records) / max(1, len(lane_records))
     vehicle_count = sum(
         r.count_cars
         + r.count_microbus
         + r.count_buses
         + r.count_trucks
         + r.count_motorcycles
-        for r in records
+        for r in lane_records
     )
     avg_pce = arrival_flow / max(1.0, float(vehicle_count))
 
@@ -454,3 +493,53 @@ def ingest_cv_telemetry(
     if result.status == "ERROR":
         raise HTTPException(status_code=404, detail=result.message)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Module 5: Weather Protocol Advisor (Fog / Shaboura & SSD)
+# ---------------------------------------------------------------------------
+@router.post("/dss/weather-protocol", response_model=WeatherResponse)
+def weather_protocol(payload: WeatherRequest):
+    return evaluate_weather_protocol(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 6: Smart On-Ramp Metering & Merge Controller
+# ---------------------------------------------------------------------------
+@router.post("/dss/ramp-metering", response_model=RampMeteringResponse)
+def ramp_metering(payload: RampMeteringRequest):
+    return evaluate_ramp_metering(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 7: Parallel Corridor Diversion Balancer (BPR)
+# ---------------------------------------------------------------------------
+@router.post("/dss/diversion-balance", response_model=DiversionResponse)
+def diversion_balance(payload: DiversionRequest):
+    return evaluate_diversion_balancer(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 8: Security Checkpoint & Toll Plaza Optimizer
+# ---------------------------------------------------------------------------
+@router.post("/dss/checkpoint-optimize", response_model=CheckpointResponse)
+def checkpoint_optimize(payload: CheckpointRequest):
+    return evaluate_checkpoint_optimizer(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 9: Bridge Joint & Surface Defect ROI Prioritizer
+# ---------------------------------------------------------------------------
+@router.post("/dss/defect-prioritize", response_model=DefectRoiResponse)
+def defect_prioritize(payload: DefectRoiRequest):
+    return evaluate_defect_prioritization(payload)
+
+
+# ---------------------------------------------------------------------------
+# Module 10: Mega-Event & School Peak Surge Orchestrator
+# ---------------------------------------------------------------------------
+@router.post("/dss/surge-dispersal", response_model=SurgeOrchestratorResponse)
+def surge_dispersal(payload: SurgeOrchestratorRequest):
+    return evaluate_surge_orchestration(payload)
+
+

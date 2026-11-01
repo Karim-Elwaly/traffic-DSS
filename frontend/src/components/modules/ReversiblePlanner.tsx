@@ -5,6 +5,7 @@ import {
   ReversibleResponse,
   evaluateReversibleAPI,
 } from '../../api/client';
+import { ReversibleCanvas } from '../simulation/ReversibleCanvas';
 import { Language, translations } from '../../i18n/translations';
 
 interface ReversiblePlannerProps {
@@ -188,6 +189,17 @@ export const ReversiblePlanner: React.FC<ReversiblePlannerProps> = ({
             <span>85% Extreme Surge</span>
           </div>
         </div>
+      )}
+
+      {/* Live 60fps Bidirectional 8-Lane Corridor Canvas (QMB Barrier + Green Wave) */}
+      {data && (
+        <ReversibleCanvas
+          inboundFlow={inboundFlow}
+          outboundFlow={outboundFlow}
+          recommendedMode={data.recommended_mode as 'REVERSIBLE_5_3' | 'BALANCED_4_4'}
+          emergencyMode={emergencyMode}
+          language={language}
+        />
       )}
 
       {/* Dynamic Roadway Cross-Section (8 Lanes + Moveable Barrier QMB) */}

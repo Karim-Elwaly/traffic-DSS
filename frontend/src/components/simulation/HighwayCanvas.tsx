@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, RefreshCw, Eye, Activity, Gauge } from 'lucide-react';
+import { Play, Pause, RefreshCw, Eye, Activity, Gauge, Flame, Radio, AlertTriangle } from 'lucide-react';
 import {
   VehicleClassSpec,
   averagePce,
@@ -29,6 +29,10 @@ interface HighwayCanvasProps {
   planningDelaySec?: number;
   /** Analytical hourly queue for the same scenario, for comparison. */
   planningQueueM?: number;
+  /** Incident mode with crash/stall marker and backward shockwave propagation */
+  incidentMode?: boolean;
+  incidentType?: string;
+  shockwaveSpeedKmh?: number;
 }
 
 interface Vehicle {
@@ -96,11 +100,16 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   scenarioLabel,
   planningDelaySec,
   planningQueueM,
+  incidentMode = false,
+  incidentType = 'COLLISION',
+  shockwaveSpeedKmh = 16.0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [simSpeed, setSimSpeed] = useState<1 | 2 | 4 | 8>(2);
   const [resetToken, setResetToken] = useState(0);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showRadar, setShowRadar] = useState(false);
   const [live, setLive] = useState<LiveStats>({
     throughputPce: 0,
     queueM: 0,
@@ -126,6 +135,28 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
   useEffect(() => {
     languageRef.current = language;
   }, [language]);
+
+  const showHeatmapRef = useRef(false);
+  const showRadarRef = useRef(false);
+  const incidentModeRef = useRef(incidentMode);
+  const incidentTypeRef = useRef(incidentType);
+  const shockwaveSpeedRef = useRef(shockwaveSpeedKmh);
+
+  useEffect(() => {
+    showHeatmapRef.current = showHeatmap;
+  }, [showHeatmap]);
+  useEffect(() => {
+    showRadarRef.current = showRadar;
+  }, [showRadar]);
+  useEffect(() => {
+    incidentModeRef.current = incidentMode;
+  }, [incidentMode]);
+  useEffect(() => {
+    incidentTypeRef.current = incidentType;
+  }, [incidentType]);
+  useEffect(() => {
+    shockwaveSpeedRef.current = shockwaveSpeedKmh;
+  }, [shockwaveSpeedKmh]);
 
   const vehiclesRef = useRef<Vehicle[]>([]);
   const nextIdRef = useRef(1);
@@ -579,7 +610,7 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
           veh.xM = TAPER_END_M - veh.lengthM / 2 - 0.2;
           veh.speed = 0;
         }
-        veh.braking = accel < -0.35 || (veh.speed < 1.0 && desired > 1.0);
+        veh.braking = accel < -0.5 || (veh.speed < 1.0 && desired > 1.0);
         veh.laneVisual += (veh.lane - veh.laneVisual) * Math.min(1, dtSim * 5.5);
       }
 
@@ -813,11 +844,13 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         ctx.fillRect(lengthPx / 2 - 2, -widthPx / 2 + 1, 2, 2);
         ctx.fillRect(lengthPx / 2 - 2, widthPx / 2 - 3, 2, 2);
         if (v.braking) {
-          ctx.fillStyle = '#ef4444';
-          ctx.shadowColor = '#ef4444';
-          ctx.shadowBlur = 6;
-          ctx.fillRect(-lengthPx / 2, -widthPx / 2 + 1, 2, 2);
-          ctx.fillRect(-lengthPx / 2, widthPx / 2 - 3, 2, 2);
+          ctx.fillStyle = '#ff2222';
+          ctx.shadowColor = '#ff0033';
+          ctx.shadowBlur = 12; // Dynamic intense red brake-light glow
+          ctx.fillRect(-lengthPx / 2 - 1, -widthPx / 2 + 1, 3, 2.5);
+          ctx.fillRect(-lengthPx / 2 - 1, widthPx / 2 - 3.5, 3, 2.5);
+          // Center High-Mounted Stop Lamp (CHMSL)
+          ctx.fillRect(-lengthPx / 2 - 1, -0.75, 2.5, 1.5);
         }
         // Amber turn signal while merging
         if (!isOpen(v.lane) || v.mergeCooldown > 2.2) {
@@ -829,15 +862,198 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         ctx.restore();
       }
 
+      // Speed Heatmap Overlay
+      if (showHeatmapRef.current) {
+        const nSegments = 6;
+        const segLenM = NETWORK_M / nSegments;
+        for (let s = 0; s < nSegments; s++) {
+          const x0 = s * segLenM;
+          const x1 = (s + 1) * segLenM;
+          for (let lane = 1; lane <= 4; lane++) {
+            const inSeg = vehiclesRef.current.filter(
+              (veh) => veh.lane === lane && veh.xM >= x0 && veh.xM < x1
+            );
+            const meanSpd = inSeg.length > 0
+              ? (inSeg.reduce((acc, veh) => acc + veh.speed, 0) / inSeg.length) * 3.6
+              : (isOpen(lane) ? speedLimitKmh : 0);
+            const yTop = ROAD_TOP + (4 - lane) * LANE_H;
+            let col = 'rgba(16, 185, 129, 0.20)'; // Green (>50 km/h)
+            if (meanSpd < 25) col = 'rgba(239, 68, 68, 0.35)'; // Red (<25 km/h)
+            else if (meanSpd < 50) col = 'rgba(245, 158, 11, 0.25)'; // Amber (25-50 km/h)
+            ctx.fillStyle = col;
+            ctx.fillRect(x0 * PX_PER_M, yTop, segLenM * PX_PER_M, LANE_H);
+          }
+        }
+      }
+
+      // Incident Mode & Backward Propagating Shockwave
+      if (incidentModeRef.current) {
+        const incX = TAPER_END_M * PX_PER_M;
+        const incType = incidentTypeRef.current || 'COLLISION';
+        const wKmh = shockwaveSpeedRef.current || 16.0;
+        const waveTravelM = (simClock * (wKmh / 3.6) * 1.5) % Math.max(100, storageM * 0.9);
+        const waveFrontM = Math.max(10, TAPER_END_M - waveTravelM);
+        const waveFrontX = waveFrontM * PX_PER_M;
+
+        // Backward shockwave crimson zone
+        const waveGrad = ctx.createLinearGradient(waveFrontX, 0, incX, 0);
+        waveGrad.addColorStop(0, 'rgba(244, 63, 94, 0.45)');
+        waveGrad.addColorStop(0.5, 'rgba(239, 68, 68, 0.28)');
+        waveGrad.addColorStop(1, 'rgba(225, 29, 72, 0.15)');
+        ctx.fillStyle = waveGrad;
+        ctx.fillRect(waveFrontX, ROAD_TOP, incX - waveFrontX, 4 * LANE_H);
+
+        // Pulsating shockwave wavefront boundary
+        ctx.strokeStyle = '#f43f5e';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(waveFrontX, ROAD_TOP);
+        ctx.lineTo(waveFrontX, ROAD_TOP + 4 * LANE_H);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Wavefront speed badge
+        ctx.fillStyle = 'rgba(244, 63, 94, 0.95)';
+        ctx.font = 'bold 9px JetBrains Mono, monospace';
+        ctx.fillText(`← SHOCKWAVE w = ${wKmh.toFixed(1)} km/h`, Math.max(10, waveFrontX + 4), ROAD_TOP + 12);
+
+        // Incident marker with flashing hazard strobe
+        const strobe = Math.sin(simClock * 14) > 0;
+        ctx.fillStyle = strobe ? 'rgba(239, 68, 68, 0.95)' : 'rgba(245, 158, 11, 0.95)';
+        ctx.beginPath();
+        ctx.arc(incX - 10, ROAD_TOP + 2 * LANE_H, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('⚠', incX - 15, ROAD_TOP + 2 * LANE_H + 4);
+
+        ctx.fillStyle = '#f87171';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.fillText(`🚨 ${incType}`, incX + 8, ROAD_TOP + 2 * LANE_H + 4);
+
+        // Upstream exit marker at x = 25m
+        const exitPx = 25 * PX_PER_M;
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(exitPx, ROAD_TOP - 8);
+        ctx.lineTo(exitPx, ROAD_TOP + 4 * LANE_H + 8);
+        ctx.stroke();
+
+        ctx.fillStyle = '#0284c7';
+        ctx.fillRect(exitPx - 40, ROAD_TOP - 24, 80, 16);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px JetBrains Mono, monospace';
+        ctx.fillText(`EXIT 4B (${storageM}m)`, exitPx - 36, ROAD_TOP - 12);
+
+        // Spillback alert if wave reaches exit marker
+        if (waveFrontM <= 35) {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+          ctx.font = 'bold 11px Inter, Cairo, sans-serif';
+          ctx.fillText(
+            languageRef.current === 'ar'
+              ? '🚨 ارتداد حرج: موجة الصدمة أغلقت المخرج السابق!'
+              : '🚨 CRITICAL: Shockwave has blocked upstream exit 4B!',
+            exitPx + 6,
+            ROAD_TOP - 12
+          );
+        }
+      }
+
+      // Virtual Radar Probes
+      if (showRadarRef.current) {
+        const upVehs = vehiclesRef.current.filter((v) => v.xM >= 40 && v.xM <= 80);
+        const downVehs = vehiclesRef.current.filter((v) => v.xM >= 220 && v.xM <= 260);
+        const upSpd = upVehs.length > 0 ? (upVehs.reduce((a, b) => a + b.speed, 0) / upVehs.length) * 3.6 : speedLimitKmh;
+        const downSpd = downVehs.length > 0 ? (downVehs.reduce((a, b) => a + b.speed, 0) / downVehs.length) * 3.6 : (isOpen(1) ? speedLimitKmh : workzoneSpeedKmh);
+
+        ctx.save();
+        ctx.font = 'bold 9px JetBrains Mono, monospace';
+
+        // Upstream Radar Gantry at x = 60m
+        const rxUp = 60 * PX_PER_M;
+        const roadBottom = ROAD_TOP + 4 * LANE_H;
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(rxUp, ROAD_TOP - 4);
+        ctx.lineTo(rxUp, roadBottom + 5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const upTxt = `📡 RADAR 1: ${Math.round(upSpd)} km/h`;
+        const upMetrics = ctx.measureText(upTxt);
+        const upW = Math.max(120, Math.ceil(upMetrics.width) + 16);
+        const upH = 20;
+        const upX = rxUp - upW / 2;
+        const upY = roadBottom + 6;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(upX, upY, upW, upH, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(upTxt, rxUp, upY + upH / 2);
+
+        // Downstream Radar Gantry at x = 240m
+        const rxDown = 240 * PX_PER_M;
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(rxDown, ROAD_TOP - 4);
+        ctx.lineTo(rxDown, roadBottom + 5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const downTxt = `📡 RADAR 2: ${Math.round(downSpd)} km/h`;
+        const downMetrics = ctx.measureText(downTxt);
+        const downW = Math.max(120, Math.ceil(downMetrics.width) + 16);
+        const downH = 20;
+        const downX = rxDown - downW / 2;
+        const downY = roadBottom + 6;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(downX, downY, downW, downH, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#a855f7';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(downTxt, rxDown, downY + downH / 2);
+
+        ctx.restore();
+      }
+
       // Queue and backpressure overlay
       if (frameStats.queueM > 30) {
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
-        ctx.font = 'bold 11px Inter, Cairo, sans-serif';
         const txt =
           languageRef.current === 'ar'
             ? `⚠ ارتداد طابور ${Math.round(frameStats.queueM)} م — دمج إجباري`
             : `⚠ ${Math.round(frameStats.queueM)} m queue — mandatory merge`;
-        ctx.fillText(txt, 16, ROAD_TOP - 10);
+        ctx.font = 'bold 10px Inter, Cairo, sans-serif';
+        const txtWidth = ctx.measureText(txt).width;
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.roundRect(12, ROAD_TOP - 26, txtWidth + 14, 19, 4);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#f87171';
+        ctx.fillText(txt, 19, ROAD_TOP - 13);
       }
 
       animationFrameIdRef.current = requestAnimationFrame(render);
@@ -878,6 +1094,32 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Truck
             </span>
           </div>
+
+          <button
+            onClick={() => setShowHeatmap(!showHeatmap)}
+            className={`p-1.5 rounded-lg border transition flex items-center gap-1.5 text-xs font-semibold ${
+              showHeatmap
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border-transparent'
+            }`}
+            title="Toggle Speed Heatmap Overlay"
+          >
+            <Flame className="w-4 h-4" />
+            <span className="hidden md:inline">{language === 'ar' ? 'خريطة السرعات' : 'Speed Heatmap'}</span>
+          </button>
+
+          <button
+            onClick={() => setShowRadar(!showRadar)}
+            className={`p-1.5 rounded-lg border transition flex items-center gap-1.5 text-xs font-semibold ${
+              showRadar
+                ? 'bg-purple-500/20 text-purple-400 border-purple-500/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border-transparent'
+            }`}
+            title="Toggle Virtual Radar Probes"
+          >
+            <Radio className="w-4 h-4" />
+            <span className="hidden md:inline">{language === 'ar' ? 'رادارات القياس' : 'Virtual Radars'}</span>
+          </button>
 
           <button
             onClick={() => setIsPlaying(!isPlaying)}

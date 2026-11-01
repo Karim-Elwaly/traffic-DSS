@@ -261,7 +261,153 @@ def test_cv_ingest_endpoint(client):
     assert lane1["avg_speed_kmh"] == 52.0
     assert lane2["count_cars"] == 45
     assert lane2["avg_speed_kmh"] == 68.0
-    # PCE uses the platform-wide weighting (cars 1.0, microbus 1.5, bus 2.0,
-    # truck 2.5, motorcycle 0.4).
     assert lane1["pce_flow"] == pytest.approx(77.5)
     assert lane2["pce_flow"] == pytest.approx(70.2)
+
+
+def test_realistic_hourly_telemetry_flow_envelope(client):
+    """
+    Verify that 24-hour demand does NOT monotonically climb to 60,000 PCE/h.
+    Each hour h (0..23) must return realistic directional 4-lane flow rates:
+    - Night (00:00 - 05:00): 900 to 1,800 PCE/h
+    - Morning Peak (07:00 - 10:00): 6,200 to 7,400 PCE/h
+    - Midday (11:00 - 13:00): 4,500 to 5,400 PCE/h
+    - Afternoon Peak (14:00 - 18:00): 6,500 to 7,600 PCE/h
+    - Evening (19:00 - 23:00): 3,200 to 5,200 PCE/h
+    """
+    res = client.get("/api/corridors/corridor_26july/telemetry?day_of_week=0")
+    assert res.status_code == 200
+    hourly = res.json()["hourly_data"]
+    assert len(hourly) == 24
+
+    for item in hourly:
+        h = item["hour"]
+        total_pce = item["total_pce"]
+
+        # Critical check: Must never exceed 8,500 PCE/h (corridor physical capacity)
+        assert total_pce <= 8500.0, f"Hour {h} total PCE {total_pce} exceeded corridor physical capacity!"
+
+        if 0 <= h <= 5:
+            assert 800 <= total_pce <= 2200, f"Night hour {h} flow {total_pce} outside expected envelope"
+        elif 7 <= h <= 10:
+            assert 5800 <= total_pce <= 7800, f"Morning peak hour {h} flow {total_pce} outside expected envelope"
+        elif 11 <= h <= 13:
+            assert 4200 <= total_pce <= 5800, f"Midday hour {h} flow {total_pce} outside expected envelope"
+        elif 14 <= h <= 18:
+            assert 6000 <= total_pce <= 8000, f"Afternoon peak hour {h} flow {total_pce} outside expected envelope"
+        elif 19 <= h <= 23:
+            assert 2800 <= total_pce <= 5500, f"Evening hour {h} flow {total_pce} outside expected envelope"
+
+
+def test_weather_protocol_api(client):
+    """Test POST /api/dss/weather-protocol endpoint."""
+    payload = {
+        "corridor_id": "corridor_26july",
+        "visibility_m": 45.0,
+        "current_speed_limit_kmh": 90.0,
+        "road_condition": "wet",
+        "gradient_pct": 1.0,
+        "traffic_flow_pce": 4000.0,
+    }
+    res = client.post("/api/dss/weather-protocol", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["visibility_m"] == 45.0
+    assert data["safe_advisory_speed_kmh"] <= 60.0
+    assert data["pacing_convoy_required"] is True
+    assert len(data["police_sop_actions_ar"]) > 0
+
+
+def test_checkpoint_optimize_api(client):
+    """Test POST /api/dss/checkpoint-optimize endpoint."""
+    payload = {
+        "checkpoint_id": "toll_km26",
+        "inbound_flow_veh_per_hour": 2500,
+        "total_booths": 8,
+        "open_booths": 4,
+        "booth_type": "mixed",
+        "service_rate_per_booth_vph": 300,
+        "heavy_vehicle_share_pct": 20,
+        "target_max_wait_sec": 60,
+    }
+    res = client.post("/api/dss/checkpoint-optimize", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_booths"] == 8
+    assert data["optimal_open_booths"] >= 4
+    assert len(data["booth_allocation_ar"]) == 8
+
+
+def test_diversion_balance_api(client):
+    """Test POST /api/dss/diversion-balance endpoint."""
+    payload = {
+        "total_corridor_demand_vph": 8000,
+        "primary_corridor_name": "26th July",
+        "primary_free_flow_time_min": 15.0,
+        "primary_capacity_vph": 4800,
+        "alternate_corridor_name": "Rod El-Farag",
+        "alternate_free_flow_time_min": 18.0,
+        "alternate_capacity_vph": 6200,
+        "incident_delay_factor": 2.0,
+    }
+    res = client.post("/api/dss/diversion-balance", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["time_saved_per_vehicle_min"] > 0
+    assert data["vms_switch_active"] is True
+    assert len(data["diversion_curve"]) == 36
+
+
+def test_ramp_metering_api(client):
+    """Test POST /api/dss/ramp-metering endpoint."""
+    payload = {
+        "corridor_id": "corridor_26july",
+        "mainline_flow_pce": 5800.0,
+        "ramp_demand_pce": 1100.0,
+        "heavy_pct": 16.0,
+        "control_mode": "ALINEA_METERED",
+    }
+    res = client.post("/api/dss/ramp-metering", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["mainline_flow_pce"] == 5800.0
+    assert data["metering_rate_pce_h"] >= 300.0
+    assert len(data["modes"]) == 3
+
+
+def test_defect_prioritize_api(client):
+    """Test POST /api/dss/defect-prioritize endpoint."""
+    payload = {
+        "corridor_id": "corridor_26july",
+        "defect_type": "DAMAGED_EXPANSION_JOINT",
+        "crawl_speed_kmh": 14.0,
+        "affected_lanes": 2,
+        "repair_hours": 4.0,
+        "speed_limit_kmh": 80.0,
+    }
+    res = client.post("/api/dss/defect-prioritize", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["daily_wasted_phd"] > 0.0
+    assert len(data["corridor_defect_inventory"]) == 5
+    assert len(data["hourly_delay_curve"]) == 24
+
+
+def test_surge_dispersal_api(client):
+    """Test POST /api/dss/surge-dispersal endpoint."""
+    payload = {
+        "corridor_id": "corridor_26july",
+        "event_type": "STADIUM_EGRESS",
+        "surge_vehicles": 5000,
+        "base_corridor_flow_pce": 3600.0,
+        "stagger_minutes": 30,
+        "enable_express_chute": True,
+    }
+    res = client.post("/api/dss/surge-dispersal", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["timeline"]) == 19
+    assert data["clearance_time_saved_min"] >= 15
+    assert len(data["gate_playbook_en"]) == 5
+
+

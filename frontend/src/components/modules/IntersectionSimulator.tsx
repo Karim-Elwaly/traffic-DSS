@@ -261,13 +261,17 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
                         </span>
                       </td>
                       <td className="py-3.5 px-3 text-center font-mono">
-                        <span className={alt.average_delay_sec > 55 ? 'text-rose-400' : 'text-slate-200'}>
-                          {alt.average_delay_sec}s
+                        <span className={alt.average_delay_sec > 55 ? 'text-rose-400 font-bold' : 'text-slate-200'}>
+                          {alt.average_delay_sec >= 180.0
+                            ? (isAr ? '>180 ث (تشبع تام)' : '>180s (Oversaturated)')
+                            : `${alt.average_delay_sec}s`}
                         </span>
                       </td>
                       <td className="py-3.5 px-3 text-center font-mono">
-                        <span className={alt.queue_95th_m > 300 ? 'text-rose-400' : 'text-slate-200'}>
-                          {alt.queue_95th_m} m
+                        <span className={alt.queue_95th_m > 300 ? 'text-rose-400 font-bold' : 'text-slate-200'}>
+                          {alt.queue_95th_m >= 950.0
+                            ? (isAr ? '≥950 م (طابور حرج)' : '≥950m (Critical)')
+                            : `${alt.queue_95th_m} m`}
                         </span>
                       </td>
                       <td className="py-3.5 px-3 text-center font-mono">
@@ -322,6 +326,7 @@ export const IntersectionSimulator: React.FC<IntersectionSimulatorProps> = ({
         turningPct={turningPct}
         heavyPct={heavyPct}
         uturnDistanceM={uturnDist}
+        alternatives={data?.alternatives}
         signalPlanningDelaySec={signalPlanning?.average_delay_sec}
         signalPlanningQueueM={signalPlanning?.queue_95th_m}
         uturnPlanningDelaySec={uturnPlanning?.average_delay_sec}

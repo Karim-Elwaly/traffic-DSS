@@ -334,6 +334,17 @@ export async function fetchCorridors(): Promise<CorridorSummary[]> {
   return FALLBACK_CORRIDORS;
 }
 
+export async function fetchCorridorTelemetryAPI(
+  corridorId: string,
+  dayOfWeek: number = 0
+): Promise<CorridorTelemetryResponse> {
+  const res = await fetch(`${API_BASE}/corridors/${corridorId}/telemetry?day_of_week=${dayOfWeek}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch telemetry for ${corridorId}`);
+  }
+  return await res.json();
+}
+
 async function postSimulation<T>(path: string, payload: unknown): Promise<T> {
   let res: Response;
   try {
@@ -421,3 +432,306 @@ export async function predictShockwaveAPI(payload: ShockwaveRequest): Promise<Sh
 export async function evaluateReversibleAPI(payload: ReversibleRequest): Promise<ReversibleResponse> {
   return postSimulation<ReversibleResponse>('/dss/reversible-evaluate', payload);
 }
+
+// ---------------------------------------------------------------------------
+// Real-Time Computer Vision (CV) Ingest
+// ---------------------------------------------------------------------------
+export interface CVIngestLaneFeed {
+  lane_number: number;
+  count_cars: number;
+  count_microbus: number;
+  count_buses: number;
+  count_trucks: number;
+  count_motorcycles: number;
+  avg_speed_kmh: number;
+  lane_weaving_index: number;
+}
+
+export interface CVIngestRequest {
+  camera_id: string;
+  corridor_id: string;
+  timestamp_epoch?: number;
+  lanes: CVIngestLaneFeed[];
+}
+
+export interface CVIngestResponse {
+  status: string;
+  corridor_id: string;
+  processed_lanes: number;
+  total_instantaneous_pce: number;
+  total_instantaneous_passengers: number;
+  state_updated: boolean;
+  telemetry_day_of_week?: number;
+  telemetry_hour?: number;
+  message: string;
+}
+
+export async function ingestCVTelemetryAPI(payload: CVIngestRequest): Promise<CVIngestResponse> {
+  return postSimulation<CVIngestResponse>('/cv/ingest', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 5: Weather Protocol Advisor (Fog / Shaboura & SSD)
+// ---------------------------------------------------------------------------
+export interface WeatherRequest {
+  corridor_id: string;
+  visibility_m: number;
+  current_speed_limit_kmh: number;
+  road_condition: string;
+  gradient_pct: number;
+  traffic_flow_pce: number;
+  heavy_pct?: number;
+}
+
+export interface WeatherResponse {
+  visibility_m: number;
+  road_condition: string;
+  friction_coefficient: number;
+  current_stopping_sight_distance_m: number;
+  ssd_car_m: number;
+  ssd_truck_m: number;
+  safe_advisory_speed_kmh: number;
+  safe_stopping_sight_distance_m: number;
+  stopping_distance_deficit_m: number;
+  pileup_risk_pct: number;
+  protocol_tier: string;
+  pacing_convoy_required: boolean;
+  convoy_speed_kmh: number;
+  convoy_lead_vehicles_count: number;
+  vms_warning_text_en: string;
+  vms_warning_text_ar: string;
+  police_sop_actions_en: string[];
+  police_sop_actions_ar: string[];
+  risk_level: string;
+}
+
+export async function evaluateWeatherProtocolAPI(payload: WeatherRequest): Promise<WeatherResponse> {
+  return postSimulation<WeatherResponse>('/dss/weather-protocol', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 8: Security Checkpoint & Toll Plaza Optimizer
+// ---------------------------------------------------------------------------
+export interface CheckpointRequest {
+  checkpoint_id: string;
+  inbound_flow_veh_per_hour: number;
+  total_booths: number;
+  open_booths: number;
+  booth_type: string;
+  service_rate_per_booth_vph: number;
+  heavy_vehicle_share_pct: number;
+  target_max_wait_sec: number;
+}
+
+export interface CheckpointResponse {
+  checkpoint_id: string;
+  inbound_flow_veh_per_hour: number;
+  total_booths: number;
+  open_booths: number;
+  optimal_open_booths: number;
+  traffic_intensity_rho: number;
+  avg_wait_time_sec: number;
+  avg_queue_veh: number;
+  queue_length_m: number;
+  green_bypass_triggered: boolean;
+  bypass_lanes_to_open: number;
+  throughput_veh_per_hour: number;
+  level_of_service: string;
+  mitigation_strategy_en: string;
+  mitigation_strategy_ar: string;
+  booth_allocation_en: string[];
+  booth_allocation_ar: string[];
+}
+
+export async function optimizeCheckpointAPI(payload: CheckpointRequest): Promise<CheckpointResponse> {
+  return postSimulation<CheckpointResponse>('/dss/checkpoint-optimize', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 6: Smart On-Ramp Metering & Merge Controller
+// ---------------------------------------------------------------------------
+export interface RampMeteringRequest {
+  corridor_id: string;
+  mainline_flow_pce: number;
+  ramp_demand_pce: number;
+  heavy_pct: number;
+  control_mode: 'UNCONTROLLED' | 'ALINEA_METERED' | 'CHANNELIZED_BARRIER' | string;
+}
+
+export interface RampModeComparison {
+  mode_id: string;
+  mode_name_en: string;
+  mode_name_ar: string;
+  effective_capacity_pce: number;
+  capacity_loss_pct: number;
+  mainline_speed_kmh: number;
+  ramp_queue_veh: number;
+  ramp_delay_sec: number;
+  throughput_gain_pct: number;
+  level_of_service: string;
+}
+
+export interface RampMeteringResponse {
+  corridor_id: string;
+  mainline_flow_pce: number;
+  ramp_demand_pce: number;
+  heavy_pct: number;
+  recommended_mode: string;
+  metering_rate_pce_h: number;
+  signal_cycle_sec: number;
+  barrier_length_m: number;
+  modes: RampModeComparison[];
+  sop_directives_en: string[];
+  sop_directives_ar: string[];
+  executive_summary_en: string;
+  executive_summary_ar: string;
+}
+
+export async function evaluateRampMeteringAPI(payload: RampMeteringRequest): Promise<RampMeteringResponse> {
+  return postSimulation<RampMeteringResponse>('/dss/ramp-metering', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 7: Parallel Corridor Diversion Balancer (BPR)
+// ---------------------------------------------------------------------------
+export interface DiversionPoint {
+  diversion_pct: number;
+  primary_time_min: number;
+  alt_time_min: number;
+  total_network_phd: number;
+}
+
+export interface DiversionRequest {
+  total_corridor_demand_vph: number;
+  primary_corridor_name: string;
+  primary_free_flow_time_min: number;
+  primary_capacity_vph: number;
+  alternate_corridor_name: string;
+  alternate_free_flow_time_min: number;
+  alternate_capacity_vph: number;
+  incident_delay_factor: number;
+}
+
+export interface DiversionResponse {
+  total_demand_vph: number;
+  do_nothing_primary_flow_vph: number;
+  do_nothing_alternate_flow_vph: number;
+  do_nothing_primary_time_min: number;
+  do_nothing_alternate_time_min: number;
+  optimal_primary_flow_vph: number;
+  optimal_alternate_flow_vph: number;
+  optimal_equilibrium_time_min: number;
+  recommended_diversion_pct: number;
+  time_saved_per_vehicle_min: number;
+  system_hours_saved_daily: number;
+  vms_switch_active: boolean;
+  vms_advisory_en: string;
+  vms_advisory_ar: string;
+  network_efficiency_gain_pct: number;
+  diversion_curve?: DiversionPoint[];
+}
+
+export async function balanceDiversionAPI(payload: DiversionRequest): Promise<DiversionResponse> {
+  return postSimulation<DiversionResponse>('/dss/diversion-balance', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 9: Bridge Joint & Surface Defect ROI Prioritizer
+// ---------------------------------------------------------------------------
+export interface DefectItem {
+  defect_id: string;
+  defect_name_en: string;
+  defect_name_ar: string;
+  km_marker: string;
+  defect_type: string;
+  affected_lanes: number;
+  crawl_speed_kmh: number;
+  capacity_drop_pct: number;
+  daily_wasted_phd: number;
+  repair_hours: number;
+  roi_phd_per_repair_hour: number;
+  recommended_window: string;
+  priority_rank: number;
+}
+
+export interface DefectHourlyDelay {
+  hour: number;
+  demand_pce: number;
+  defect_capacity_pce: number;
+  delay_hours: number;
+  wasted_phd: number;
+}
+
+export interface DefectRoiRequest {
+  corridor_id: string;
+  defect_type: string;
+  crawl_speed_kmh: number;
+  affected_lanes: number;
+  repair_hours: number;
+  speed_limit_kmh: number;
+}
+
+export interface DefectRoiResponse {
+  corridor_id: string;
+  defect_type: string;
+  active_defect_capacity_pce: number;
+  capacity_reduction_pct: number;
+  daily_wasted_phd: number;
+  roi_phd_per_repair_hour: number;
+  hourly_delay_curve: DefectHourlyDelay[];
+  corridor_defect_inventory: DefectItem[];
+  recommended_night_window: string;
+  sop_directives_en: string[];
+  sop_directives_ar: string[];
+}
+
+export async function evaluateDefectRoiAPI(payload: DefectRoiRequest): Promise<DefectRoiResponse> {
+  return postSimulation<DefectRoiResponse>('/dss/defect-prioritize', payload);
+}
+
+// ---------------------------------------------------------------------------
+// Module 10: Mega-Event & School Peak Surge Orchestrator
+// ---------------------------------------------------------------------------
+export interface SurgeTimelineStep {
+  minute: number;
+  uncontrolled_flow_vph: number;
+  staggered_flow_vph: number;
+  corridor_capacity_vph: number;
+  uncontrolled_vc: number;
+  staggered_vc: number;
+  uncontrolled_queue_veh: number;
+  staggered_queue_veh: number;
+  delay_saved_pct: number;
+}
+
+export interface SurgeOrchestratorRequest {
+  corridor_id: string;
+  event_type: string;
+  surge_vehicles: number;
+  base_corridor_flow_pce: number;
+  stagger_minutes: number;
+  enable_express_chute: boolean;
+}
+
+export interface SurgeOrchestratorResponse {
+  corridor_id: string;
+  event_type: string;
+  surge_vehicles: number;
+  uncontrolled_peak_vc: number;
+  staggered_peak_vc: number;
+  uncontrolled_clearance_min: number;
+  staggered_clearance_min: number;
+  clearance_time_saved_min: number;
+  aggregate_delay_reduction_pct: number;
+  max_uncontrolled_queue_m: number;
+  max_staggered_queue_m: number;
+  timeline: SurgeTimelineStep[];
+  gate_playbook_en: string[];
+  gate_playbook_ar: string[];
+}
+
+export async function evaluateSurgeOrchestratorAPI(payload: SurgeOrchestratorRequest): Promise<SurgeOrchestratorResponse> {
+  return postSimulation<SurgeOrchestratorResponse>('/dss/surge-dispersal', payload);
+}
+
+

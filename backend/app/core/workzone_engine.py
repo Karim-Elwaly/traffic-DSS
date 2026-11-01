@@ -83,8 +83,9 @@ def _simulate_hourly_step(
     demand_veh = max(0.0, demand) / avg_pce
     capacity_veh = max(1.0, capacity) / avg_pce
 
-    # Physical storage between the work-zone taper and the previous exit.
-    storage_veh = max(1.0, upstream_exit_distance_m * open_lanes / JAM_SPACING_M)
+    # Physical storage along the corridor segment bounded by the upstream exit.
+    storage_limit_m = upstream_exit_distance_m if upstream_exit_distance_m > 0 else 600.0
+    storage_veh = max(1.0, storage_limit_m * open_lanes / JAM_SPACING_M)
     q0 = max(0.0, min(queue_veh, storage_veh))
 
     if demand_veh <= capacity_veh:
@@ -133,13 +134,11 @@ def _simulate_hourly_step(
     delay_sec = min(MAX_HOURLY_DELAY_SEC, queue_delay_sec + base_delay_sec)
 
     queue_length_m = min(
-        upstream_exit_distance_m,
-        q_end * JAM_SPACING_M / max(1, open_lanes),
+        storage_limit_m,
+        max(0.0, q_end * JAM_SPACING_M / max(1, open_lanes)),
     )
-    spillback = (
-        q_end >= storage_veh * 0.95
-        or queue_length_m >= upstream_exit_distance_m * 0.95
-    )
+    # Spillback triggers whenever the queue hits the upstream exit marker
+    spillback = queue_length_m >= (upstream_exit_distance_m * 0.95)
 
     # Speed drop relative to a free-flow trip over the same work-zone length.
     if joining_veh > 1e-6 and free_flow_time > 0.0:

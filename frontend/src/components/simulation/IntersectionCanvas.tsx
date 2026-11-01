@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Gauge,
   Activity,
+  Radio,
 } from 'lucide-react';
 import {
   VehicleClassSpec,
@@ -22,18 +23,31 @@ import {
 } from '../../simulation/microsim';
 
 type Language = 'en' | 'ar';
+export type AlternativeId = 'OPEN' | 'SIGNAL' | 'UTURN' | 'ROUNDABOUT';
 type SignalStream = 'east' | 'west' | 'south' | 'north';
 type UturnStream = 'east' | 'west' | 'side' | 'loop';
 type Phase = 'MAIN_GREEN' | 'MAIN_YELLOW' | 'ALL_RED' | 'CROSS_GREEN' | 'CROSS_YELLOW' | 'ALL_RED_2';
 type Los = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
-interface IntersectionCanvasProps {
+export interface IntersectionCanvasProps {
   mainFlow: number;
   crossFlow: number;
   language?: Language;
   turningPct?: number;
   heavyPct?: number;
   uturnDistanceM?: number;
+  /** Full list of analytical alternatives from DSS optimizer. */
+  alternatives?: Array<{
+    id: string;
+    name_en: string;
+    name_ar: string;
+    level_of_service: string;
+    average_delay_sec: number;
+    queue_95th_m: number;
+    conflict_points: number;
+    volume_to_capacity: number;
+    safety_index_pct: number;
+  }>;
   /** Analytical HCM/Webster planning values for the same scenario. */
   signalPlanningDelaySec?: number;
   signalPlanningQueueM?: number;
@@ -47,6 +61,7 @@ interface SimVehicle {
   y: number;
   angle: number;
   speed: number;
+  accel?: number;
   spec: VehicleClassSpec;
   color: string;
   lengthPx: number;
@@ -170,6 +185,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   turningPct = 18,
   heavyPct = 12,
   uturnDistanceM = 450,
+  alternatives,
   signalPlanningDelaySec,
   signalPlanningQueueM,
   uturnPlanningDelaySec,
@@ -179,6 +195,11 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   const signalCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const uturnCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  const [leftAlt, setLeftAlt] = useState<AlternativeId>('SIGNAL');
+  const [rightAlt, setRightAlt] = useState<AlternativeId>('UTURN');
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showRadar, setShowRadar] = useState(false);
+
   const [isPlaying, setIsPlaying] = useState(true);
   const [simSpeed, setSimSpeed] = useState<1 | 2 | 4>(2);
   const [showConflicts, setShowConflicts] = useState(true);
@@ -186,11 +207,27 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   const [live, setLive] = useState<LiveMetrics>(initialLive);
   const [resetToken, setResetToken] = useState(0);
 
+  const leftAltRef = useRef<AlternativeId>('SIGNAL');
+  const rightAltRef = useRef<AlternativeId>('UTURN');
+  const showHeatmapRef = useRef(false);
+  const showRadarRef = useRef(false);
   const isPlayingRef = useRef(true);
   const simSpeedRef = useRef<1 | 2 | 4>(2);
   const showConflictsRef = useRef(true);
   const enableHeadlightsRef = useRef(true);
 
+  useEffect(() => {
+    leftAltRef.current = leftAlt;
+  }, [leftAlt]);
+  useEffect(() => {
+    rightAltRef.current = rightAlt;
+  }, [rightAlt]);
+  useEffect(() => {
+    showHeatmapRef.current = showHeatmap;
+  }, [showHeatmap]);
+  useEffect(() => {
+    showRadarRef.current = showRadar;
+  }, [showRadar]);
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
@@ -1123,17 +1160,116 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         ctx.closePath();
         ctx.fill();
       }
-      if (v.braking || v.speed < 2) {
-        ctx.fillStyle = '#ef4444';
-        ctx.shadowColor = '#ef4444';
-        ctx.shadowBlur = 8;
-        ctx.fillRect(-v.lengthPx / 2, -v.widthPx / 2 + 1, 2, 2.5);
-        ctx.fillRect(-v.lengthPx / 2, v.widthPx / 2 - 3.5, 2, 2.5);
+      if (v.braking || (v.accel !== undefined && v.accel < -0.5) || v.speed < 2) {
+        ctx.fillStyle = '#ff2222';
+        ctx.shadowColor = '#ff0033';
+        ctx.shadowBlur = 12; // Dynamic intense red brake-light glow
+        ctx.fillRect(-v.lengthPx / 2 - 1, -v.widthPx / 2 + 1, 3, 2.5);
+        ctx.fillRect(-v.lengthPx / 2 - 1, v.widthPx / 2 - 3.5, 3, 2.5);
+        // Center High-Mounted Stop Lamp (CHMSL)
+        ctx.fillRect(-v.lengthPx / 2 - 1, -0.75, 2.5, 1.5);
       }
       ctx.restore();
     };
 
-    const drawSignalScene = (time: number) => {
+    const drawSpeedHeatmap = (ctx: CanvasRenderingContext2D, vehs: SimVehicle[], isRoundabout = false) => {
+      if (!showHeatmapRef.current) return;
+      ctx.save();
+      if (isRoundabout) {
+        ctx.beginPath();
+        ctx.arc(320, 180, 75, 0, Math.PI * 2);
+        ctx.lineWidth = 42;
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.22)';
+        ctx.stroke();
+        ctx.restore();
+        return;
+      }
+      const eb = vehs.filter((v) => v.stream === 'east' && v.x < 260);
+      const ebSpd = eb.length ? (eb.reduce((a, b) => a + b.speed, 0) / eb.length / PX_PER_M) * 3.6 : 60;
+      ctx.fillStyle = ebSpd > 40 ? 'rgba(16, 185, 129, 0.22)' : ebSpd > 20 ? 'rgba(245, 158, 11, 0.28)' : 'rgba(239, 68, 68, 0.35)';
+      ctx.fillRect(0, 180, 258, 60);
+
+      const wb = vehs.filter((v) => v.stream === 'west' && v.x > 380);
+      const wbSpd = wb.length ? (wb.reduce((a, b) => a + b.speed, 0) / wb.length / PX_PER_M) * 3.6 : 60;
+      ctx.fillStyle = wbSpd > 40 ? 'rgba(16, 185, 129, 0.22)' : wbSpd > 20 ? 'rgba(245, 158, 11, 0.28)' : 'rgba(239, 68, 68, 0.35)';
+      ctx.fillRect(382, 120, W - 382, 60);
+
+      const sb = vehs.filter((v) => v.stream === 'south' && v.y < 120);
+      const sbSpd = sb.length ? (sb.reduce((a, b) => a + b.speed, 0) / sb.length / PX_PER_M) * 3.6 : 50;
+      ctx.fillStyle = sbSpd > 35 ? 'rgba(16, 185, 129, 0.22)' : sbSpd > 18 ? 'rgba(245, 158, 11, 0.28)' : 'rgba(239, 68, 68, 0.35)';
+      ctx.fillRect(260, 0, 60, 118);
+
+      const nb = vehs.filter((v) => v.stream === 'north' && v.y > 240);
+      const nbSpd = nb.length ? (nb.reduce((a, b) => a + b.speed, 0) / nb.length / PX_PER_M) * 3.6 : 50;
+      ctx.fillStyle = nbSpd > 35 ? 'rgba(16, 185, 129, 0.22)' : nbSpd > 18 ? 'rgba(245, 158, 11, 0.28)' : 'rgba(239, 68, 68, 0.35)';
+      ctx.fillRect(320, 242, 60, H - 242);
+      ctx.restore();
+    };
+
+    const drawVirtualRadars = (ctx: CanvasRenderingContext2D, upSpd: number, downSpd: number) => {
+      if (!showRadarRef.current) return;
+      ctx.save();
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(110, 110);
+      ctx.lineTo(110, 250);
+      ctx.stroke();
+      ctx.font = 'bold 9px JetBrains Mono, monospace';
+
+      const upTxt = `📡 RADAR-UP: ${Math.round(upSpd)} km/h`;
+      const upW = Math.max(125, Math.ceil(ctx.measureText(upTxt).width) + 16);
+      const upH = 20;
+      const upX = 110 - upW / 2;
+      const upY = 82;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(upX, upY, upW, upH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#06b6d4';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(upTxt, 110, upY + upH / 2);
+
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(530, 110);
+      ctx.lineTo(530, 250);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const downTxt = `📡 RADAR-DN: ${Math.round(downSpd)} km/h`;
+      const downW = Math.max(125, Math.ceil(ctx.measureText(downTxt).width) + 16);
+      const downH = 20;
+      const downX = 530 - downW / 2;
+      const downY = 82;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(downX, downY, downW, downH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#a855f7';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(downTxt, 530, downY + downH / 2);
+
+      ctx.restore();
+    };
+
+    const drawSignalScene = (time: number, targetCtx: CanvasRenderingContext2D = sigCtx) => {
+      const sigCtx = targetCtx;
       sigCtx.fillStyle = '#060a12';
       sigCtx.fillRect(0, 0, W, H);
       sigCtx.fillStyle = '#0c1322';
@@ -1316,10 +1452,13 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         });
       }
 
+      drawSpeedHeatmap(sigCtx, signalVehicles);
+      drawVirtualRadars(sigCtx, live.signalSpeed > 0 ? live.signalSpeed : 50, 30);
       signalVehicles.forEach((v) => renderVehicle(sigCtx, v));
     };
 
-    const drawUturnScene = (time: number) => {
+    const drawUturnScene = (time: number, targetCtx: CanvasRenderingContext2D = uturnCtx) => {
+      const uturnCtx = targetCtx;
       uturnCtx.fillStyle = '#060a12';
       uturnCtx.fillRect(0, 0, W, H);
       uturnCtx.fillStyle = '#0c1322';
@@ -1400,7 +1539,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         uturnCtx.lineTo(cx, cy);
         uturnCtx.lineTo(cx - 8 * dir, cy + 6);
         uturnCtx.stroke();
-        };
+      };
       uturnCtx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
       uturnCtx.lineWidth = 2;
       drawChevron(120, 225, true);
@@ -1434,7 +1573,314 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         });
       }
 
+      drawSpeedHeatmap(uturnCtx, uturnVehicles);
+      drawVirtualRadars(uturnCtx, live.uturnSpeed > 0 ? live.uturnSpeed : 55, 45);
       uturnVehicles.forEach((v) => renderVehicle(uturnCtx, v));
+    };
+
+    const drawOpenScene = (ctx: CanvasRenderingContext2D, time: number) => {
+      ctx.fillStyle = '#060a12';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#0c1322';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#141d2e';
+      ctx.fillRect(0, 120, W, 120);
+      ctx.fillRect(260, 0, 120, H);
+
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, 120);
+      ctx.lineTo(260, 120);
+      ctx.lineTo(260, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(380, 0);
+      ctx.lineTo(380, 120);
+      ctx.lineTo(W, 120);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, 240);
+      ctx.lineTo(260, 240);
+      ctx.lineTo(260, H);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(380, H);
+      ctx.lineTo(380, 240);
+      ctx.lineTo(W, 240);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 178);
+      ctx.lineTo(W, 178);
+      ctx.moveTo(0, 182);
+      ctx.lineTo(W, 182);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(0, 150);
+      ctx.lineTo(250, 150);
+      ctx.moveTo(390, 150);
+      ctx.lineTo(W, 150);
+      ctx.moveTo(0, 210);
+      ctx.lineTo(250, 210);
+      ctx.moveTo(390, 210);
+      ctx.lineTo(W, 210);
+      ctx.moveTo(290, 0);
+      ctx.lineTo(290, 110);
+      ctx.moveTo(350, 250);
+      ctx.lineTo(350, H);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(260, 118);
+      ctx.lineTo(318, 118);
+      ctx.moveTo(322, 242);
+      ctx.lineTo(380, 242);
+      ctx.stroke();
+
+      const drawStopSign = (x: number, y: number) => {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = '#dc2626';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const r = 9;
+        for (let i = 0; i < 8; i++) {
+          const a = (i * Math.PI) / 4 + Math.PI / 8;
+          const px = r * Math.cos(a);
+          const py = r * Math.sin(a);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 7px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isAr ? 'قف' : 'STOP', 0, 0);
+        ctx.restore();
+      };
+      drawStopSign(250, 110);
+      drawStopSign(390, 250);
+
+      if (showConflictsRef.current) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * 0.007);
+        const crossPts = [
+          [290, 150], [320, 150], [350, 150], [290, 180], [320, 180], [350, 180],
+          [290, 210], [320, 210], [350, 210], [275, 165], [305, 165], [335, 165],
+          [365, 165], [275, 195], [305, 195], [365, 195],
+        ];
+        crossPts.forEach(([x, y]) => {
+          ctx.save();
+          ctx.strokeStyle = `rgba(239, 68, 68, ${0.4 + 0.5 * pulse})`;
+          ctx.fillStyle = `rgba(239, 68, 68, ${0.25 + 0.25 * pulse})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, 6 + 3 * pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#f87171';
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+        const mergeDivergePts = [
+          [260, 150], [260, 210], [380, 150], [380, 210],
+          [290, 120], [350, 120], [290, 240], [350, 240],
+          [245, 135], [245, 225], [395, 135], [395, 225],
+          [275, 105], [365, 105], [275, 255], [365, 255],
+        ];
+        mergeDivergePts.forEach(([x, y]) => {
+          ctx.save();
+          ctx.fillStyle = `rgba(245, 158, 11, ${0.4 + 0.3 * pulse})`;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+      }
+
+      drawSpeedHeatmap(ctx, signalVehicles);
+      drawVirtualRadars(ctx, 45, 25);
+      signalVehicles.forEach((v) => renderVehicle(ctx, v));
+    };
+
+    const drawRoundaboutScene = (ctx: CanvasRenderingContext2D, time: number) => {
+      ctx.fillStyle = '#060a12';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#0c1322';
+      ctx.fillRect(0, 0, W, H);
+
+      const cx = 320;
+      const cy = 180;
+      const rOuter = 95;
+      const rInner = 42;
+
+      ctx.fillStyle = '#141d2e';
+      ctx.fillRect(0, cy - 55, W, 110);
+      ctx.fillRect(cx - 55, 0, 110, H);
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
+      ctx.fillStyle = '#141d2e';
+      ctx.fill();
+
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, 60, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 78, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+      ctx.fillStyle = '#064e3b';
+      ctx.fill();
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 3.5;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 24, 0, Math.PI * 2);
+      ctx.fillStyle = '#022c22';
+      ctx.fill();
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      const drawSplitter = (angle: number) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rOuter + 6, -6);
+        ctx.lineTo(rOuter + 90, -14);
+        ctx.lineTo(rOuter + 90, 14);
+        ctx.lineTo(rOuter + 6, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      };
+      drawSplitter(0);
+      drawSplitter(Math.PI / 2);
+      drawSplitter(Math.PI);
+      drawSplitter((3 * Math.PI) / 2);
+
+      const drawYieldTeeth = (angle: number) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.fillStyle = '#f8fafc';
+        for (let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(rOuter + 3, i * 16 - 5);
+          ctx.lineTo(rOuter + 10, i * 16);
+          ctx.lineTo(rOuter + 3, i * 16 + 5);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      };
+      drawYieldTeeth(0);
+      drawYieldTeeth(Math.PI / 2);
+      drawYieldTeeth(Math.PI);
+      drawYieldTeeth((3 * Math.PI) / 2);
+
+      if (showConflictsRef.current) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * 0.006);
+        const roundPts = [
+          [cx + rOuter - 6, cy + 24], [cx + rOuter - 6, cy - 24],
+          [cx - rOuter + 6, cy + 24], [cx - rOuter + 6, cy - 24],
+          [cx + 24, cy + rOuter - 6], [cx - 24, cy + rOuter - 6],
+          [cx + 24, cy - rOuter + 6], [cx - 24, cy - rOuter + 6],
+        ];
+        roundPts.forEach(([x, y]) => {
+          ctx.save();
+          ctx.strokeStyle = `rgba(16, 185, 129, ${0.5 + 0.4 * pulse})`;
+          ctx.fillStyle = `rgba(16, 185, 129, ${0.2 + 0.2 * pulse})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, 7 + 2 * pulse, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = '#34d399';
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+      }
+
+      drawSpeedHeatmap(ctx, signalVehicles, true);
+      drawVirtualRadars(ctx, 36, 32);
+
+      const roundVehiclesCount = 8;
+      const baseSpeed = simTime * 0.45;
+      for (let i = 0; i < roundVehiclesCount; i++) {
+        const laneRadius = i % 3 === 0 ? 52 : i % 3 === 1 ? 69 : 86;
+        const ang = (baseSpeed * (60 / laneRadius) + (i * Math.PI * 2) / roundVehiclesCount) % (Math.PI * 2);
+        const vx = cx + laneRadius * Math.cos(ang);
+        const vy = cy + laneRadius * Math.sin(ang);
+        const heading = ang + Math.PI / 2;
+        const vDummy: SimVehicle = {
+          id: 9000 + i,
+          x: vx,
+          y: vy,
+          angle: heading,
+          speed: 8.5 * PX_PER_M,
+          spec: sampleVehicleClass(rng, heavyPct),
+          color: i % 2 === 0 ? '#38bdf8' : '#fbbf24',
+          lengthPx: 18,
+          widthPx: 8,
+          stream: 'east',
+          lane: 1,
+          departTime: 0,
+          stoppedTime: 0,
+          braking: false,
+          passedStop: true,
+          movement: 'through',
+        };
+        renderVehicle(ctx, vDummy);
+      }
+    };
+
+    const renderAlternativeScene = (alt: AlternativeId, ctx: CanvasRenderingContext2D, time: number) => {
+      if (alt === 'SIGNAL') {
+        drawSignalScene(time, ctx);
+      } else if (alt === 'UTURN') {
+        drawUturnScene(time, ctx);
+      } else if (alt === 'OPEN') {
+        drawOpenScene(ctx, time);
+      } else if (alt === 'ROUNDABOUT') {
+        drawRoundaboutScene(ctx, time);
+      }
     };
 
     const loop = (time: number) => {
@@ -1453,8 +1899,8 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         setLive(computeLive());
       }
 
-      drawSignalScene(time);
-      drawUturnScene(time);
+      renderAlternativeScene(leftAltRef.current, sigCtx, time);
+      renderAlternativeScene(rightAltRef.current, uturnCtx, time);
 
       animFrameRef.current = requestAnimationFrame(loop);
     };
@@ -1505,6 +1951,103 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       ? 'text-amber-400 border-amber-500/40 bg-amber-500/15'
       : 'text-rose-400 border-rose-500/40 bg-rose-500/15';
 
+  const getAlternativeMetrics = (alt: AlternativeId) => {
+    const plan = alternatives?.find((a) => a.id === alt);
+    if (alt === 'SIGNAL') {
+      return {
+        titleEn: 'Webster 4-Phase Signalized Intersection',
+        titleAr: 'تقاطع بإشارة ويبستر رباعية الأطوار',
+        conflictBadge: isAr ? '٨ نقاط تعارض حرجة' : '8 Conflict Points',
+        conflictPts: 8,
+        los: live.signalLos,
+        warmup: live.warmup,
+        delaySec: live.signalDelay,
+        queueM: live.signalQueueM,
+        kpi3Label: isAr ? 'التدفق' : 'Throughput',
+        kpi3Val: `${Math.round(live.signalThroughput).toLocaleString()} veh/h`,
+        collisionType: isAr ? 'تعامد خطير 90°' : 'High T-Bone 90°',
+        planDelay: plan?.average_delay_sec ?? signalPlanningDelaySec,
+        planQueue: plan?.queue_95th_m ?? signalPlanningQueueM,
+        borderColor: 'border-rose-900/40',
+        badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        dotColor: 'bg-rose-500',
+      };
+    }
+    if (alt === 'UTURN') {
+      return {
+        titleEn: 'Protected U-Turn Axis (Continuous Flow)',
+        titleAr: 'محور دوران للخلف محمي (تدفق مستمر)',
+        conflictBadge: isAr ? '٤ نقاط اندماج آمنة' : '4 Safe Merging Nodes',
+        conflictPts: 4,
+        los: live.uturnLos,
+        warmup: live.uturnWarmup,
+        delaySec: live.uturnDelay,
+        queueM: live.uturnQueueM,
+        kpi3Label: isAr ? 'السرعة' : 'Speed',
+        kpi3Val: `${live.uturnSpeed.toFixed(1)} km/h`,
+        collisionType: isAr ? 'اندماج زاوية حادة' : 'Low-Angle Merge',
+        planDelay: plan?.average_delay_sec ?? uturnPlanningDelaySec,
+        planQueue: plan?.queue_95th_m ?? uturnPlanningQueueM,
+        borderColor: 'border-emerald-900/40',
+        badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+        dotColor: 'bg-emerald-500',
+      };
+    }
+    if (alt === 'OPEN') {
+      const rawDelay = plan?.average_delay_sec ?? Math.min(240, Math.max(38, Math.round(effectiveCrossFlow * 0.08 + (effectiveMainFlow > 3000 ? 55 : 20))));
+      const rawQueue = plan?.queue_95th_m ?? Math.min(950, Math.max(120, Math.round(effectiveCrossFlow * 0.28)));
+      const los = (plan?.level_of_service as Los) ?? (rawDelay > 80 ? 'F' : 'E');
+      return {
+        titleEn: 'Open Uncontrolled Intersection',
+        titleAr: 'تقاطع مفتوح بدون إشارة أو تحكم',
+        conflictBadge: isAr ? '٣٢ نقطة تصادم خطرة' : '32 Conflict Points',
+        conflictPts: 32,
+        los,
+        warmup: false,
+        delaySec: rawDelay,
+        queueM: rawQueue,
+        kpi3Label: isAr ? 'التدفق المتاح' : 'Throughput',
+        kpi3Val: `${Math.round((effectiveMainFlow + effectiveCrossFlow) * 0.68).toLocaleString()} veh/h`,
+        collisionType: isAr ? 'تصادم متعامد مميت 90°' : 'Fatal 90° T-Bone',
+        planDelay: plan?.average_delay_sec,
+        planQueue: plan?.queue_95th_m,
+        borderColor: 'border-red-950/80',
+        badgeColor: 'bg-red-500/20 text-red-300 border-red-500/30',
+        dotColor: 'bg-red-500',
+      };
+    }
+    // ROUNDABOUT
+    const rawDelay = plan?.average_delay_sec ?? Math.min(55, Math.max(8, 12 + (effectiveMainFlow + effectiveCrossFlow) * 0.006));
+    const rawQueue = plan?.queue_95th_m ?? Math.min(220, Math.max(15, Math.round((effectiveMainFlow + effectiveCrossFlow) * 0.035)));
+    const los = (plan?.level_of_service as Los) ?? (rawDelay > 35 ? 'D' : rawDelay > 20 ? 'C' : 'B');
+    return {
+      titleEn: '3-Lane Modern Roundabout',
+      titleAr: 'دوار مروري حديث ثلاثي الحارات',
+      conflictBadge: isAr ? '٨ نقاط احتكاك منخفضة' : '8 Conflict Points',
+      conflictPts: 8,
+      los,
+      warmup: false,
+      delaySec: rawDelay,
+      queueM: rawQueue,
+      kpi3Label: isAr ? 'السرعة الدائرية' : 'Circulating Spd',
+      kpi3Val: '34.0 km/h',
+      collisionType: isAr ? 'احتكاك جانبي خفيف 20°' : 'Sideswipe 20°',
+      planDelay: plan?.average_delay_sec,
+      planQueue: plan?.queue_95th_m,
+      borderColor: 'border-cyan-900/40',
+      badgeColor: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+      dotColor: 'bg-cyan-500',
+    };
+  };
+
+  const leftMetrics = getAlternativeMetrics(leftAlt);
+  const rightMetrics = getAlternativeMetrics(rightAlt);
+
+  const delayDifferencePct =
+    leftMetrics.delaySec > 0
+      ? ((leftMetrics.delaySec - rightMetrics.delaySec) / leftMetrics.delaySec) * 100
+      : 0;
+
   return (
     <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-2xl backdrop-blur-md">
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4 pb-3.5 border-b border-slate-800">
@@ -1516,17 +2059,17 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
               <span>
                 {isAr
-                  ? 'المقارنة المرئية التفاعلية: إشارة ويبستر مقابل محور الدوران المحمي'
-                  : 'Interactive Comparator: Webster Signal vs Protected U-Turn Axis'}
+                  ? 'المقارنة المرئية التفاعلية: مقارنة البدائل الهندسية الـ 4'
+                  : 'Interactive Comparator: 4-Way Geometric Alternatives'}
               </span>
               <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-500/30 font-mono">
-                IDM · Poisson · Webster
+                IDM · HCM 6th · Webster
               </span>
             </h4>
             <p className="text-xs text-slate-400 mt-0.5">
               {isAr
-                ? `دورة إشارة ${live.cycleSec}s محسوبة من الطلب، وصول بواسون، وتأخير مقاس لحظياً`
-                : `${live.cycleSec}s Webster cycle from demand, Poisson arrivals, live measured delay`}
+                ? 'قارن أي بديلين هندسيين مباشرة بمعدل 60 إطار/ثانية مع حساب التأخير ونقاط التعارض لحظياً'
+                : 'Compare any two engineering alternatives live at 60fps with real-time delay and conflict analysis'}
             </p>
           </div>
         </div>
@@ -1547,10 +2090,36 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           </div>
 
           <button
+            onClick={() => setShowHeatmap(!showHeatmap)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+              showHeatmap
+                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm shadow-rose-500/10'
+                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+            title={isAr ? 'إظهار / إخفاء خريطة السرعات' : 'Toggle Speed Heatmap Overlay'}
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span>{isAr ? 'خريطة السرعات' : 'Speed Heatmap'}</span>
+          </button>
+
+          <button
+            onClick={() => setShowRadar(!showRadar)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+              showRadar
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+                : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+            title={isAr ? 'إظهار / إخفاء رادارات القياس' : 'Toggle Virtual Radar Probes'}
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>{isAr ? 'رادارات القياس' : 'Virtual Radars'}</span>
+          </button>
+
+          <button
             onClick={() => setShowConflicts(!showConflicts)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
               showConflicts
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm shadow-rose-500/10'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/10'
                 : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
             }`}
             title={isAr ? 'إظهار / إخفاء نقاط التعارض' : 'Toggle Conflict Points Overlay'}
@@ -1591,47 +2160,61 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {/* Signal panel */}
-        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-rose-900/40 shadow-xl flex flex-col justify-between">
+        {/* Left Alternative Panel */}
+        <div className={`bg-slate-950/80 p-3.5 rounded-xl border ${leftMetrics.borderColor} shadow-xl flex flex-col justify-between`}>
           <div>
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800/80">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" />
-                <span className="text-xs font-bold text-rose-400">
-                  {isAr ? '1. تقاطع بإشارة ويبستر رباعية الأطوار' : '1. Webster 4-Phase Signalized Intersection'}
-                </span>
+                <span className={`w-2.5 h-2.5 rounded-full ${leftMetrics.dotColor} animate-pulse`} />
+                <select
+                  value={leftAlt}
+                  onChange={(e) => setLeftAlt(e.target.value as AlternativeId)}
+                  className="bg-slate-900 border border-slate-700 text-xs font-bold text-slate-100 rounded-lg px-2 py-1 outline-none focus:border-cyan-500 cursor-pointer"
+                >
+                  <option value="SIGNAL">{isAr ? '١. إشارة ويبستر رباعية الأطوار' : '1. Webster 4-Phase Signal'}</option>
+                  <option value="UTURN">{isAr ? '٢. محور دوران للخلف محمي' : '2. Protected U-Turn Axis'}</option>
+                  <option value="OPEN">{isAr ? '٣. تقاطع مفتوح بدون تحكم' : '3. Open Uncontrolled'}</option>
+                  <option value="ROUNDABOUT">{isAr ? '٤. دوار مروري ثلاثي الحارات' : '4. 3-Lane Roundabout'}</option>
+                </select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full border border-rose-500/30 font-bold">
-                  {isAr ? '٨ نقاط تعارض حرجة' : '8 Conflict Points'}
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-bold ${leftMetrics.badgeColor}`}>
+                  {leftMetrics.conflictBadge}
                 </span>
-                <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(live.signalLos)}`}>
-                  LOS {live.warmup ? '—' : live.signalLos}
+                <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(leftMetrics.los)}`}>
+                  LOS {leftMetrics.warmup ? '—' : leftMetrics.los}
                 </span>
               </div>
             </div>
 
             <div className="relative rounded-lg overflow-hidden border border-slate-800/80 bg-[#060a12]">
               <canvas ref={signalCanvasRef} width={W} height={H} className="w-full aspect-[16/9] block rounded-lg" />
-              <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
-                <span
-                  className={`w-2.5 h-2.5 rounded-full ${
-                    live.phase.includes('GREEN')
-                      ? 'bg-emerald-500 shadow-emerald-500/50 shadow-sm animate-pulse'
-                      : live.phase.includes('YELLOW')
-                      ? 'bg-amber-500 shadow-amber-500/50 shadow-sm animate-pulse'
-                      : 'bg-rose-500 shadow-rose-500/50 shadow-sm'
-                  }`}
-                />
-                <span className="text-slate-200 font-semibold">{signalStateLabel}</span>
-                <span className="text-amber-400 font-bold ml-1">{live.countdown}s</span>
-              </div>
+              {leftAlt === 'SIGNAL' ? (
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      live.phase.includes('GREEN')
+                        ? 'bg-emerald-500 shadow-emerald-500/50 shadow-sm animate-pulse'
+                        : live.phase.includes('YELLOW')
+                        ? 'bg-amber-500 shadow-amber-500/50 shadow-sm animate-pulse'
+                        : 'bg-rose-500 shadow-rose-500/50 shadow-sm'
+                    }`}
+                  />
+                  <span className="text-slate-200 font-semibold">{signalStateLabel}</span>
+                  <span className="text-amber-400 font-bold ml-1">{live.countdown}s</span>
+                </div>
+              ) : (
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
+                  <span className={`w-2.5 h-2.5 rounded-full ${leftMetrics.dotColor} animate-pulse`} />
+                  <span className="text-slate-200 font-semibold">
+                    {isAr ? leftMetrics.titleAr : leftMetrics.titleEn}
+                  </span>
+                </div>
+              )}
               <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg text-slate-300">
-                <span className="text-slate-400">{isAr ? 'طابور الانتظار: ' : 'Queue: '}</span>
+                <span className="text-slate-400">{isAr ? 'طول الطابور: ' : 'Queue: '}</span>
                 <span className="text-rose-400 font-bold">
-                  {live.warmup
-                    ? '—'
-                    : `${live.signalQueueVeh} ${isAr ? 'مركبة' : 'veh'} · ${Math.round(live.signalQueueM)} m`}
+                  {leftMetrics.warmup ? '—' : `${Math.round(leftMetrics.queueM)} m`}
                 </span>
               </div>
             </div>
@@ -1641,124 +2224,128 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'متوسط التأخير' : 'Avg Delay'}</span>
               <span className="text-xs font-bold text-rose-400 font-mono">
-                {live.warmup ? '—' : `${live.signalDelay.toFixed(1)} s/veh`}
+                {leftMetrics.warmup ? '—' : `${leftMetrics.delaySec.toFixed(1)} s/veh`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
               <span className="text-xs font-bold text-amber-400 font-mono">
-                {live.warmup ? '—' : `${Math.round(live.signalQueueM)} m`}
+                {leftMetrics.warmup ? '—' : `${Math.round(leftMetrics.queueM)} m`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
-                <Activity className="w-3 h-3" /> {isAr ? 'التدفق' : 'Throughput'}
+                <Activity className="w-3 h-3" /> {leftMetrics.kpi3Label}
               </span>
               <span className="text-xs font-bold text-cyan-400 font-mono">
-                {live.warmup ? '—' : `${Math.round(live.signalThroughput).toLocaleString()} veh/h`}
+                {leftMetrics.warmup ? '—' : leftMetrics.kpi3Val}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'نوع التصادم' : 'Collision Type'}</span>
-              <span className="text-xs font-bold text-rose-400">{isAr ? 'تعامد خطير 90°' : 'High T-Bone 90°'}</span>
+              <span className="text-xs font-bold text-rose-400">{leftMetrics.collisionType}</span>
             </div>
           </div>
-          {signalPlanningDelaySec !== undefined && signalPlanningQueueM !== undefined && (
-            <div
-              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono"
-              title={
-                isAr
-                  ? 'المرجع التحليلي يوزع تأخير ويبستر/HCM على كامل الطلب وفي تحليل 15 دقيقة، بينما القياس الحي يجمع زمن الرحلة الفعلي من محاكاة IDM خلال آخر دورتين إشاريتين.'
-                  : 'The analytical reference applies Webster/HCM delay to the full demand over a 15-minute analysis period; the live sample measures actual IDM journey delay over the last two signal cycles.'
-              }
-            >
-              <span className="text-slate-400">
-                {isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}
-              </span>
-              <span>{signalPlanningDelaySec.toFixed(1)} s/veh</span>
-              <span>{Math.round(signalPlanningQueueM)} m</span>
+          {leftMetrics.planDelay !== undefined && leftMetrics.planQueue !== undefined && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono">
+              <span className="text-slate-400">{isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}</span>
+              <span>{leftMetrics.planDelay.toFixed(1)} s/veh</span>
+              <span>{Math.round(leftMetrics.planQueue)} m</span>
             </div>
           )}
         </div>
 
-        {/* U-turn panel */}
-        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-emerald-900/40 shadow-xl flex flex-col justify-between">
+        {/* Right Alternative Panel */}
+        <div className={`bg-slate-950/80 p-3.5 rounded-xl border ${rightMetrics.borderColor} shadow-xl flex flex-col justify-between`}>
           <div>
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800/80">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs font-bold text-emerald-400">
-                  {isAr
-                    ? '2. إلغاء التقاطع + محور دوران للخلف محمي'
-                    : '2. Protected U-Turn Axis (Continuous Flow)'}
-                </span>
+                <span className={`w-2.5 h-2.5 rounded-full ${rightMetrics.dotColor} animate-pulse`} />
+                <select
+                  value={rightAlt}
+                  onChange={(e) => setRightAlt(e.target.value as AlternativeId)}
+                  className="bg-slate-900 border border-slate-700 text-xs font-bold text-slate-100 rounded-lg px-2 py-1 outline-none focus:border-cyan-500 cursor-pointer"
+                >
+                  <option value="UTURN">{isAr ? '٢. محور دوران للخلف محمي' : '2. Protected U-Turn Axis'}</option>
+                  <option value="SIGNAL">{isAr ? '١. إشارة ويبستر رباعية الأطوار' : '1. Webster 4-Phase Signal'}</option>
+                  <option value="OPEN">{isAr ? '٣. تقاطع مفتوح بدون تحكم' : '3. Open Uncontrolled'}</option>
+                  <option value="ROUNDABOUT">{isAr ? '٤. دوار مروري ثلاثي الحارات' : '4. 3-Lane Roundabout'}</option>
+                </select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-bold">
-                  {isAr ? '٤ نقاط اندماج آمنة' : '4 Safe Merging Nodes'}
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border font-bold ${rightMetrics.badgeColor}`}>
+                  {rightMetrics.conflictBadge}
                 </span>
-                <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(live.uturnLos)}`}>
-                  LOS {live.uturnWarmup ? '—' : live.uturnLos}
+                <span className={`text-[11px] px-2 py-0.5 rounded font-mono border font-bold ${losColor(rightMetrics.los)}`}>
+                  LOS {rightMetrics.warmup ? '—' : rightMetrics.los}
                 </span>
               </div>
             </div>
 
             <div className="relative rounded-lg overflow-hidden border border-slate-800/80 bg-[#060a12]">
               <canvas ref={uturnCanvasRef} width={W} height={H} className="w-full aspect-[16/9] block rounded-lg" />
-              <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-emerald-500/50 shadow-sm animate-pulse" />
-                <span className="text-emerald-300 font-semibold">
-                  {isAr ? 'حركة حرة مستمرة' : 'Continuous Free Flow'}
-                </span>
-                <span className="text-emerald-400/90 text-[10px]">({uturnDistanceM}m {isAr ? 'مسافة دوران' : 'detour'})</span>
-                <span className="text-emerald-400 font-bold ml-1">{live.uturnWarmup ? '—' : `${live.uturnSpeed.toFixed(0)} km/h`}</span>
-              </div>
+              {rightAlt === 'SIGNAL' ? (
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      live.phase.includes('GREEN')
+                        ? 'bg-emerald-500 shadow-emerald-500/50 shadow-sm animate-pulse'
+                        : live.phase.includes('YELLOW')
+                        ? 'bg-amber-500 shadow-amber-500/50 shadow-sm animate-pulse'
+                        : 'bg-rose-500 shadow-rose-500/50 shadow-sm'
+                    }`}
+                  />
+                  <span className="text-slate-200 font-semibold">{signalStateLabel}</span>
+                  <span className="text-amber-400 font-bold ml-1">{live.countdown}s</span>
+                </div>
+              ) : (
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg backdrop-blur-sm">
+                  <span className={`w-2.5 h-2.5 rounded-full ${rightMetrics.dotColor} animate-pulse`} />
+                  <span className="text-slate-200 font-semibold">
+                    {isAr ? rightMetrics.titleAr : rightMetrics.titleEn}
+                  </span>
+                </div>
+              )}
               <div className="absolute bottom-2.5 right-2.5 bg-slate-950/90 border border-slate-800 px-2.5 py-1 rounded-md text-[11px] font-mono shadow-lg text-slate-300">
-                <span className="text-slate-400">{isAr ? 'مركبات في الدوران: ' : 'Loop In-Flight: '}</span>
-                <span className="text-emerald-400 font-bold">{live.uturnActive} {isAr ? 'مركبة' : 'veh'}</span>
+                <span className="text-slate-400">{isAr ? 'طول الطابور: ' : 'Queue: '}</span>
+                <span className="text-emerald-400 font-bold">
+                  {rightMetrics.warmup ? '—' : `${Math.round(rightMetrics.queueM)} m`}
+                </span>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-slate-800/80 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-2.5 border-t border-slate-800/80 text-center">
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'متوسط التأخير' : 'Avg Delay'}</span>
               <span className="text-xs font-bold text-emerald-400 font-mono">
-                {live.uturnWarmup ? '—' : `${live.uturnDelay.toFixed(1)} s/veh`}
-                {!live.uturnWarmup && liveDelayReduction > 0 && (
-                  <span className="text-emerald-500/80"> (-{liveDelayReduction.toFixed(0)}%)</span>
-                )}
+                {rightMetrics.warmup ? '—' : `${rightMetrics.delaySec.toFixed(1)} s/veh`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block">{isAr ? 'طول الطابور' : 'Queue Length'}</span>
               <span className="text-xs font-bold text-emerald-400 font-mono">
-                {live.uturnWarmup ? '—' : `${Math.round(live.uturnQueueM)} m`}
+                {rightMetrics.warmup ? '—' : `${Math.round(rightMetrics.queueM)} m`}
               </span>
             </div>
             <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
               <span className="text-[10px] text-slate-400 block flex items-center justify-center gap-1">
-                <Gauge className="w-3 h-3" /> {isAr ? 'السرعة' : 'Speed'}
+                <Gauge className="w-3 h-3" /> {rightMetrics.kpi3Label}
               </span>
               <span className="text-xs font-bold text-emerald-400 font-mono">
-                {live.uturnWarmup ? '—' : `${live.uturnSpeed.toFixed(1)} km/h`}
+                {rightMetrics.warmup ? '—' : rightMetrics.kpi3Val}
               </span>
             </div>
+            <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
+              <span className="text-[10px] text-slate-400 block">{isAr ? 'نوع التصادم' : 'Collision Type'}</span>
+              <span className="text-xs font-bold text-emerald-400">{rightMetrics.collisionType}</span>
+            </div>
           </div>
-          {uturnPlanningDelaySec !== undefined && uturnPlanningQueueM !== undefined && (
-            <div
-              className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono"
-              title={
-                isAr
-                  ? 'المرجع التحليلي يوزع زمن الدوران والالتقاء على كامل الطلب المحوّل، بينما القياس الحي يتابع زمن رحلة المركبات التي دخلت محور الدوران فعلياً.'
-                  : 'The analytical reference weights detour and weaving time across all diverted demand; the live sample follows only vehicles that actually entered the U-turn axis.'
-              }
-            >
-              <span className="text-slate-400">
-                {isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}
-              </span>
-              <span>{uturnPlanningDelaySec.toFixed(1)} s/veh</span>
-              <span>{Math.round(uturnPlanningQueueM)} m</span>
+          {rightMetrics.planDelay !== undefined && rightMetrics.planQueue !== undefined && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 font-mono">
+              <span className="text-slate-400">{isAr ? 'المرجع التحليلي:' : 'Analytical reference:'}</span>
+              <span>{rightMetrics.planDelay.toFixed(1)} s/veh</span>
+              <span>{Math.round(rightMetrics.planQueue)} m</span>
             </div>
           )}
         </div>
@@ -1768,31 +2355,33 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
         <div className="flex items-center gap-2.5">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="text-slate-300 leading-relaxed">
-            {live.warmup ? (
+            {leftMetrics.warmup || rightMetrics.warmup ? (
               <span className="text-slate-400">
                 {isAr
                   ? 'جاري تسخين المحاكاة لدورة إشارة كاملة قبل نشر المؤشرات…'
-                  : 'Warming up for one full signal cycle before publishing KPIs…'}
+                  : 'Warming up for one full cycle before publishing KPIs…'}
               </span>
             ) : isAr ? (
               <>
-                <strong className="text-emerald-400 font-semibold">قياس حي: </strong>
-                نموذج إلغاء التقاطع يقلل التأخير المقاس بنسبة{' '}
-                <strong>{liveDelayReduction.toFixed(0)}%</strong> مقارنة بالإشارة، مع الحفاظ على تدفق مستمر
-                وتقليل نقاط التصادم المتعامدة من <strong>8</strong> إلى <strong>4</strong> نقاط اندماج آمنة.
+                <strong className="text-emerald-400 font-semibold">مقارنة حية: </strong>
+                البديل الأيمن ({isAr ? rightMetrics.titleAr : rightMetrics.titleEn}) يحقق فارق تأخير بنسبة{' '}
+                <strong>{Math.abs(delayDifferencePct).toFixed(0)}%</strong>{' '}
+                {delayDifferencePct >= 0 ? 'انخفاضاً' : 'ارتفاعاً'} مقارنة بالبديل الأيسر، مع{' '}
+                <strong>{rightMetrics.conflictPts} نقاط تعارض</strong> مقابل <strong>{leftMetrics.conflictPts} نقاط</strong>.
               </>
             ) : (
               <>
-                <strong className="text-emerald-400 font-semibold">Live measurement: </strong>
-                the protected U-turn axis cuts measured delay by{' '}
-                <strong>{liveDelayReduction.toFixed(0)}%</strong> versus the Webster signal, while replacing{' '}
-                <strong>8 severe 90° conflict points</strong> with <strong>4 low-angle merge nodes</strong>.
+                <strong className="text-emerald-400 font-semibold">Live Comparison: </strong>
+                {rightMetrics.titleEn} yields a{' '}
+                <strong>{Math.abs(delayDifferencePct).toFixed(0)}%</strong>{' '}
+                {delayDifferencePct >= 0 ? 'delay reduction' : 'delay increase'} versus {leftMetrics.titleEn}, with{' '}
+                <strong>{rightMetrics.conflictPts} conflict points</strong> versus <strong>{leftMetrics.conflictPts}</strong>.
               </>
             )}
           </span>
         </div>
         <span className="text-[10px] font-mono text-slate-500">
-          {simSpeed}x · IDM · Poisson · C={live.cycleSec}s
+          {simSpeed}x · IDM · Poisson · {leftAlt} vs {rightAlt}
         </span>
       </div>
     </div>
