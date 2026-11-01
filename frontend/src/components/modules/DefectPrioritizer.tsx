@@ -127,16 +127,16 @@ ${data.sop_directives_en.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={10}
-            max={45}
+            min={5}
+            max={60}
             step={5}
             value={crawlSpeed}
             onChange={(e) => setCrawlSpeed(Number(e.target.value))}
             className="w-full accent-amber-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>10 km/h (زحف شديد)</span>
-            <span>45 km/h</span>
+            <span>5 km/h ({isAr ? 'زحف شديد' : 'Severe crawl'})</span>
+            <span>60 km/h</span>
           </div>
         </div>
 
@@ -170,16 +170,16 @@ ${data.sop_directives_en.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={2}
-            max={8}
+            min={1}
+            max={12}
             step={0.5}
             value={repairHours}
             onChange={(e) => setRepairHours(Number(e.target.value))}
             className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>2 hrs</span>
-            <span>8 hrs</span>
+            <span>1 hr</span>
+            <span>12 hrs</span>
           </div>
         </div>
       </div>

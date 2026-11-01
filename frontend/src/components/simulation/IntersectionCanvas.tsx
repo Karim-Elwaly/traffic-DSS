@@ -47,6 +47,7 @@ export interface IntersectionCanvasProps {
     conflict_points: number;
     volume_to_capacity: number;
     safety_index_pct: number;
+    estimated_throughput_pce: number;
   }>;
   /** Analytical HCM/Webster planning values for the same scenario. */
   signalPlanningDelaySec?: number;
@@ -1020,6 +1021,9 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           signalQueueM = Math.max(signalQueueM, Math.max(0, back / PX_PER_M));
         }
       }
+      // The physical upstream storage on the approach is 950 m; a live queue
+      // cannot exceed it.
+      signalQueueM = Math.min(950, signalQueueM);
 
       const statsWindowSec = Math.max(65, cycleSec * 2);
       const windowSec = Math.max(10, Math.min(statsWindowSec, simTime));
@@ -1073,7 +1077,7 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
           uturnQueueM = Math.max(uturnQueueM, backPx / PX_PER_M);
         }
       }
-      uturnQueueM = Math.min(600, uturnQueueM);
+      uturnQueueM = Math.min(950, uturnQueueM);
       const completedUturnDelay = completedUturn.reduce((s, c) => s + c.delay, 0);
       const uturnDelay =
         completedUturn.length > 0
@@ -1994,20 +1998,22 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       };
     }
     if (alt === 'OPEN') {
-      const rawDelay = plan?.average_delay_sec ?? Math.min(240, Math.max(38, Math.round(effectiveCrossFlow * 0.08 + (effectiveMainFlow > 3000 ? 55 : 20))));
-      const rawQueue = plan?.queue_95th_m ?? Math.min(950, Math.max(120, Math.round(effectiveCrossFlow * 0.28)));
-      const los = (plan?.level_of_service as Los) ?? (rawDelay > 80 ? 'F' : 'E');
+      // No live microsimulation runs for this alternative. Every value must
+      // come from the backend HCM/gap-acceptance plan; if the plan is missing
+      // the panel shows "—" instead of inventing a delay or queue.
       return {
         titleEn: 'Open Uncontrolled Intersection',
         titleAr: 'تقاطع مفتوح بدون إشارة أو تحكم',
         conflictBadge: isAr ? '٣٢ نقطة تصادم خطرة' : '32 Conflict Points',
-        conflictPts: 32,
-        los,
-        warmup: false,
-        delaySec: rawDelay,
-        queueM: rawQueue,
+        conflictPts: plan?.conflict_points ?? 32,
+        los: (plan?.level_of_service as Los) ?? 'A',
+        warmup: !plan,
+        delaySec: plan?.average_delay_sec ?? 0,
+        queueM: plan?.queue_95th_m ?? 0,
         kpi3Label: isAr ? 'التدفق المتاح' : 'Throughput',
-        kpi3Val: `${Math.round((effectiveMainFlow + effectiveCrossFlow) * 0.68).toLocaleString()} veh/h`,
+        kpi3Val: plan
+          ? `${Math.round(plan.estimated_throughput_pce).toLocaleString()} veh/h`
+          : '—',
         collisionType: isAr ? 'تصادم متعامد مميت 90°' : 'Fatal 90° T-Bone',
         planDelay: plan?.average_delay_sec,
         planQueue: plan?.queue_95th_m,
@@ -2017,20 +2023,19 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
       };
     }
     // ROUNDABOUT
-    const rawDelay = plan?.average_delay_sec ?? Math.min(55, Math.max(8, 12 + (effectiveMainFlow + effectiveCrossFlow) * 0.006));
-    const rawQueue = plan?.queue_95th_m ?? Math.min(220, Math.max(15, Math.round((effectiveMainFlow + effectiveCrossFlow) * 0.035)));
-    const los = (plan?.level_of_service as Los) ?? (rawDelay > 35 ? 'D' : rawDelay > 20 ? 'C' : 'B');
     return {
       titleEn: '3-Lane Modern Roundabout',
       titleAr: 'دوار مروري حديث ثلاثي الحارات',
       conflictBadge: isAr ? '٨ نقاط احتكاك منخفضة' : '8 Conflict Points',
-      conflictPts: 8,
-      los,
-      warmup: false,
-      delaySec: rawDelay,
-      queueM: rawQueue,
-      kpi3Label: isAr ? 'السرعة الدائرية' : 'Circulating Spd',
-      kpi3Val: '34.0 km/h',
+      conflictPts: plan?.conflict_points ?? 8,
+      los: (plan?.level_of_service as Los) ?? 'A',
+      warmup: !plan,
+      delaySec: plan?.average_delay_sec ?? 0,
+      queueM: plan?.queue_95th_m ?? 0,
+      kpi3Label: isAr ? 'التدفق المتاح' : 'Throughput',
+      kpi3Val: plan
+        ? `${Math.round(plan.estimated_throughput_pce).toLocaleString()} veh/h`
+        : '—',
       collisionType: isAr ? 'احتكاك جانبي خفيف 20°' : 'Sideswipe 20°',
       planDelay: plan?.average_delay_sec,
       planQueue: plan?.queue_95th_m,
@@ -2044,6 +2049,8 @@ export const IntersectionCanvas: React.FC<IntersectionCanvasProps> = ({
   const rightMetrics = getAlternativeMetrics(rightAlt);
 
   const delayDifferencePct =
+    !leftMetrics.warmup &&
+    !rightMetrics.warmup &&
     leftMetrics.delaySec > 0
       ? ((leftMetrics.delaySec - rightMetrics.delaySec) / leftMetrics.delaySec) * 100
       : 0;

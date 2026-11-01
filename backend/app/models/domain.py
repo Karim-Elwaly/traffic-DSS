@@ -58,6 +58,22 @@ class HourlyTelemetry(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class SeedState(SQLModel, table=True):
+    """
+    Small key/value marker used to version the synthetic baseline.
+
+    When the calibrated demand profile changes, the seeder bumps the marker and
+    replaces the old telemetry exactly once, even though the corridor table is
+    already populated. CV ingestion does not touch this marker, so live camera
+    updates survive a restart.
+    """
+    __tablename__ = "seed_state"
+
+    key: str = Field(primary_key=True)
+    value: str
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class IncidentAudit(SQLModel, table=True):
     """
     Audit log for DSS scenario runs and recommended field SOPs.

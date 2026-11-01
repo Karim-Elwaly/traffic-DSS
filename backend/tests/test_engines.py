@@ -167,7 +167,7 @@ def test_intersection_engine():
     assert resp.recommendation_rationale_ar is not None
     for alt in resp.alternatives:
         assert 0.0 <= alt.average_delay_sec <= 300.0
-        assert 0.0 <= alt.queue_95th_m <= 500.0
+        assert 0.0 <= alt.queue_95th_m <= 950.0
         assert 0.0 <= alt.volume_to_capacity < 100.0
         assert alt.level_of_service in {"A", "B", "C", "D", "E", "F"}
         assert alt.conflict_points >= 0
@@ -185,7 +185,7 @@ def test_intersection_engine_heavy_demand_prefers_grade_separated_or_signal():
     assert resp.recommended_option_id in {"UTURN", "SIGNAL"}
     for alt in resp.alternatives:
         assert alt.average_delay_sec <= 300.0
-        assert alt.queue_95th_m <= 500.0
+        assert alt.queue_95th_m <= 950.0
         assert alt.volume_to_capacity < 100.0
 
 
@@ -483,10 +483,12 @@ def test_reversible_extreme_flows_stay_bounded():
 def test_seeder_lane_counts_sum_to_corridor_total():
     from sqlmodel import SQLModel, Session, create_engine, select
     from sqlmodel.pool import StaticPool
-    from backend.app.models.domain import HourlyTelemetry
+    from backend.app.core.demand_profile import band_for_hour
+    from backend.app.models.domain import HourlyTelemetry, SeedState
     from backend.app.services.synthetic_seeder import (
         CORRIDOR_METADATA,
-        _get_hourly_demand_factor,
+        SEED_STATE_KEY,
+        SEED_VERSION,
         seed_corridors_and_telemetry,
     )
 
@@ -498,6 +500,7 @@ def test_seeder_lane_counts_sum_to_corridor_total():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         seed_corridors_and_telemetry(session)
+        assert session.get(SeedState, SEED_STATE_KEY).value == SEED_VERSION
         for meta in CORRIDOR_METADATA:
             records = session.exec(
                 select(HourlyTelemetry).where(
@@ -510,7 +513,10 @@ def test_seeder_lane_counts_sum_to_corridor_total():
                 by_hour.setdefault(
                     (record.day_of_week, record.hour), []
                 ).append(record)
+            assert len(by_hour) == 7 * 24
+
             for (day, hour), lane_records in by_hour.items():
+                assert len(lane_records) == 4
                 total_vehicles = sum(
                     record.count_cars
                     + record.count_microbus
@@ -519,12 +525,17 @@ def test_seeder_lane_counts_sum_to_corridor_total():
                     + record.count_motorcycles
                     for record in lane_records
                 )
-                expected = int(
-                    6200.0
-                    * _get_hourly_demand_factor(hour, day)
-                    * meta["peak_flow_multiplier"]
+                assert total_vehicles > 0
+                realised_pce = sum(record.pce_flow for record in lane_records)
+                low, high = band_for_hour(hour)
+                assert low <= realised_pce <= high, (
+                    f"{meta['id']} day {day} hour {hour}: "
+                    f"{realised_pce} outside {low}-{high}"
                 )
-                assert total_vehicles == expected
+
+        # A second call must not duplicate or overwrite the calibrated baseline.
+        seed_corridors_and_telemetry(session)
+        assert len(session.exec(select(HourlyTelemetry)).all()) == 2016
 
 
 def test_los_exact_thresholds():

@@ -5,6 +5,7 @@ and ranks corridor road defects by return-on-investment (PHD saved per repair ho
 """
 
 from typing import List
+from backend.app.core.demand_profile import BASE_HOURLY_PCE
 from backend.app.models.schemas import (
     DefectRoiRequest,
     DefectRoiResponse,
@@ -12,11 +13,9 @@ from backend.app.models.schemas import (
     DefectItem,
 )
 
-# Standard 24-hour diurnal demand profile for Cairo 4-lane arterial (base 6,200 PCE peak)
-HOURLY_DEMAND_PROFILE = [
-    950, 750, 650, 700, 1100, 1800, 3600, 6800, 7400, 6900, 5200, 4800,
-    5100, 5400, 6700, 7500, 7200, 6600, 5400, 4800, 4200, 3500, 2400, 1500,
-]
+# Use the same authoritative diurnal profile as the telemetry seeder. The old
+# local list contradicted the seeded data at 10:00 and 22:00-23:00.
+HOURLY_DEMAND_PROFILE = [float(value) for value in BASE_HOURLY_PCE]
 
 CORRIDOR_DEFECT_REGISTRY = {
     "corridor_26july": [

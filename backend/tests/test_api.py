@@ -10,6 +10,8 @@ _ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(_ROOT_DIR))
 
+import inspect
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine, Session
@@ -47,6 +49,29 @@ def test_health_check(client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ONLINE"
+
+
+def test_db_session_dependency_closes_its_session():
+    """
+    FastAPI only runs teardown for generator dependencies. A plain Session
+    return value leaked a pooled connection per request until the pool was
+    exhausted and every DB endpoint timed out after 30 seconds.
+    """
+    from sqlalchemy import text
+
+    from backend.app.database import engine
+
+    assert inspect.isgeneratorfunction(get_session)
+    assert engine.pool.checkedout() == 0
+
+    generator = get_session()
+    session = next(generator)
+    session.execute(text("SELECT 1"))  # check a connection out of the pool
+    assert engine.pool.checkedout() == 1
+
+    generator.close()  # runs the dependency teardown
+    assert not session.in_transaction()
+    assert engine.pool.checkedout() == 0
 
 
 def test_get_corridors(client):
@@ -265,38 +290,82 @@ def test_cv_ingest_endpoint(client):
     assert lane2["pce_flow"] == pytest.approx(70.2)
 
 
+def test_cv_ingest_uses_edge_timestamp(client):
+    """Delayed camera frames must update the hour they were captured, not now."""
+    from datetime import datetime, timezone
+
+    captured = datetime(2026, 7, 26, 15, 30, tzinfo=timezone.utc)  # Sunday, 15:00
+    payload = {
+        "camera_id": "CAM_OCT_04",
+        "corridor_id": "corridor_26july",
+        "timestamp_epoch": captured.timestamp(),
+        "lanes": [
+            {
+                "lane_number": 3,
+                "count_cars": 120,
+                "count_microbus": 8,
+                "count_buses": 1,
+                "count_trucks": 0,
+                "count_motorcycles": 2,
+                "avg_speed_kmh": 61.0,
+                "lane_weaving_index": 0.18,
+            }
+        ],
+    }
+    response = client.post("/api/cv/ingest", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "SUCCESS"
+    assert data["telemetry_day_of_week"] == 0
+    assert data["telemetry_hour"] == 15
+
+    telemetry = client.get(
+        "/api/corridors/corridor_26july/telemetry?day_of_week=0"
+    ).json()
+    hour_record = next(h for h in telemetry["hourly_data"] if h["hour"] == 15)
+    lane3 = next(l for l in hour_record["lanes"] if l["lane_number"] == 3)
+    assert lane3["count_cars"] == 120
+
+
 def test_realistic_hourly_telemetry_flow_envelope(client):
     """
-    Verify that 24-hour demand does NOT monotonically climb to 60,000 PCE/h.
-    Each hour h (0..23) must return realistic directional 4-lane flow rates:
+    Every corridor/day must return independent hourly directional flow rates
+    inside the calibrated 4-lane envelopes:
     - Night (00:00 - 05:00): 900 to 1,800 PCE/h
     - Morning Peak (07:00 - 10:00): 6,200 to 7,400 PCE/h
     - Midday (11:00 - 13:00): 4,500 to 5,400 PCE/h
     - Afternoon Peak (14:00 - 18:00): 6,500 to 7,600 PCE/h
     - Evening (19:00 - 23:00): 3,200 to 5,200 PCE/h
     """
-    res = client.get("/api/corridors/corridor_26july/telemetry?day_of_week=0")
-    assert res.status_code == 200
-    hourly = res.json()["hourly_data"]
-    assert len(hourly) == 24
+    from backend.app.core.demand_profile import band_for_hour
 
-    for item in hourly:
-        h = item["hour"]
-        total_pce = item["total_pce"]
+    for corridor_id in ("corridor_26july", "corridor_ring", "corridor_salah_salem"):
+        for day in range(7):
+            res = client.get(
+                f"/api/corridors/{corridor_id}/telemetry?day_of_week={day}"
+            )
+            assert res.status_code == 200
+            hourly = res.json()["hourly_data"]
+            assert len(hourly) == 24
+            for item in hourly:
+                h = item["hour"]
+                total_pce = item["total_pce"]
+                low, high = band_for_hour(h)
+                assert low <= total_pce <= high, (
+                    f"{corridor_id} day {day} hour {h}: {total_pce} outside "
+                    f"{low}-{high} PCE/h"
+                )
 
-        # Critical check: Must never exceed 8,500 PCE/h (corridor physical capacity)
-        assert total_pce <= 8500.0, f"Hour {h} total PCE {total_pce} exceeded corridor physical capacity!"
-
-        if 0 <= h <= 5:
-            assert 800 <= total_pce <= 2200, f"Night hour {h} flow {total_pce} outside expected envelope"
-        elif 7 <= h <= 10:
-            assert 5800 <= total_pce <= 7800, f"Morning peak hour {h} flow {total_pce} outside expected envelope"
-        elif 11 <= h <= 13:
-            assert 4200 <= total_pce <= 5800, f"Midday hour {h} flow {total_pce} outside expected envelope"
-        elif 14 <= h <= 18:
-            assert 6000 <= total_pce <= 8000, f"Afternoon peak hour {h} flow {total_pce} outside expected envelope"
-        elif 19 <= h <= 23:
-            assert 2800 <= total_pce <= 5500, f"Evening hour {h} flow {total_pce} outside expected envelope"
+    # Thursday evening is the weekend-eve surge and must exceed Sunday evening.
+    thursday = client.get(
+        "/api/corridors/corridor_26july/telemetry?day_of_week=4"
+    ).json()["hourly_data"]
+    sunday = client.get(
+        "/api/corridors/corridor_26july/telemetry?day_of_week=0"
+    ).json()["hourly_data"]
+    thu_evening = [h["total_pce"] for h in thursday if 19 <= h["hour"] <= 23]
+    sun_evening = [h["total_pce"] for h in sunday if 19 <= h["hour"] <= 23]
+    assert all(t > s for t, s in zip(thu_evening, sun_evening))
 
 
 def test_weather_protocol_api(client):

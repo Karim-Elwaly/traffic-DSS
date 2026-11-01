@@ -8,19 +8,218 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
-import { Construction, AlertTriangle, CheckCircle2, Clock, Calendar, Layers, Loader2 } from 'lucide-react';
+import {
+  Construction,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Calendar,
+  Layers,
+  Loader2,
+  ShieldAlert,
+  TrendingDown,
+  Info,
+} from 'lucide-react';
 import { HighwayCanvas } from '../simulation/HighwayCanvas';
 import { KpiCard } from '../common/KpiCard';
 import { SopActionCard } from '../common/SopActionCard';
-import { WorkZoneResponse, WindowOption, optimizeWorkZoneAPI } from '../../api/client';
+import {
+  WorkZoneResponse,
+  WindowOption,
+  HourlyWorkZoneDetail,
+  optimizeWorkZoneAPI,
+} from '../../api/client';
 import { Language, translations } from '../../i18n/translations';
 
-interface WorkZoneAdvisorProps {
-  corridorId: string;
-  speedLimitKmh: number;
-  language: Language;
+interface WorkZoneTooltipProps {
+  active?: boolean;
+  payload?: any[];
+  label?: number;
+  isAr: boolean;
+  workzoneCapacity: number;
+  upstreamExitDistanceM?: number;
 }
+
+const WorkZoneCustomTooltip: React.FC<WorkZoneTooltipProps> = ({
+  active,
+  payload,
+  label,
+  isAr,
+  workzoneCapacity,
+  upstreamExitDistanceM = 600,
+}) => {
+  if (!active || !payload || !payload.length) return null;
+
+  const point: HourlyWorkZoneDetail = payload[0]?.payload;
+  if (!point) return null;
+
+  const hour = typeof label === 'number' ? label : point.hour;
+  const nextHour = (hour + 1) % 24;
+  const padH = (h: number) => h.toString().padStart(2, '0');
+  const hourText = `${padH(hour)}:00 - ${padH(nextHour)}:00`;
+
+  const demand = Math.round(point.demand_pce);
+  const cap = Math.round(point.effective_capacity || workzoneCapacity);
+  const vcRatio = cap > 0 ? demand / cap : 0;
+  const queueM = Math.round(point.queue_length_m || 0);
+  const delaySec = Number((point.delay_sec_per_veh || 0).toFixed(1));
+  const personHours = Math.round(point.person_hours_delay || 0);
+  const los =
+    point.level_of_service ||
+    (vcRatio < 0.6
+      ? 'A'
+      : vcRatio < 0.7
+      ? 'B'
+      : vcRatio < 0.8
+      ? 'C'
+      : vcRatio < 0.9
+      ? 'D'
+      : vcRatio <= 1.0
+      ? 'E'
+      : 'F');
+  const isSpillback = point.spillback_risk || queueM >= upstreamExitDistanceM;
+
+  let statusBadge = {
+    text: isAr ? 'نافذة آمنة للصيانة (سعة فائضة)' : 'Safe Maintenance Window (Capacity Surplus)',
+    bg: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+    icon: '✅',
+  };
+
+  if (demand > cap) {
+    statusBadge = {
+      text: isAr ? 'فترة حرجة - يمنع الإغلاق (عجز سعة وتكدس)' : 'Critical - Closure Prohibited (Capacity Deficit)',
+      bg: 'bg-rose-500/15 border-rose-500/40 text-rose-300',
+      icon: '⛔',
+    };
+  } else if (vcRatio >= 0.85) {
+    statusBadge = {
+      text: isAr ? 'تدفق مروري كثيف (اقتراب من التشبع)' : 'Heavy Traffic Flow (Near Capacity)',
+      bg: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+      icon: '⚡',
+    };
+  }
+
+  const losColors: Record<string, string> = {
+    A: 'bg-emerald-600 text-white',
+    B: 'bg-teal-600 text-white',
+    C: 'bg-cyan-600 text-white',
+    D: 'bg-amber-600 text-white',
+    E: 'bg-orange-600 text-white',
+    F: 'bg-rose-600 text-white animate-pulse',
+  };
+
+  return (
+    <div
+      dir={isAr ? 'rtl' : 'ltr'}
+      className="bg-slate-950/95 backdrop-blur-md border border-slate-700/80 p-3.5 rounded-xl shadow-2xl min-w-[290px] max-w-[340px] text-xs font-sans text-slate-200 pointer-events-none select-none z-50"
+    >
+      {/* Top Header */}
+      <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+        <div className="flex items-center gap-1.5 font-bold text-slate-100 text-sm">
+          <Clock className="w-4 h-4 text-cyan-400" />
+          <span dir="ltr">{hourText}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-400 uppercase font-mono">
+            {isAr ? 'مستوى الخدمة' : 'LoS'}
+          </span>
+          <span className={`px-2 py-0.5 rounded font-black text-xs shadow-sm ${losColors[los] || 'bg-slate-700'}`}>
+            {los}
+          </span>
+        </div>
+      </div>
+
+      {/* Operational Badge */}
+      <div className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium flex items-center gap-2 mb-2.5 ${statusBadge.bg}`}>
+        <span className="text-sm">{statusBadge.icon}</span>
+        <span className="leading-tight font-semibold">{statusBadge.text}</span>
+      </div>
+
+      {/* Metrics List */}
+      <div className="space-y-2">
+        {/* Demand */}
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2.5 h-2.5 rounded-sm bg-cyan-400" />
+            <span>{isAr ? 'حجم الطلب المروري' : 'Traffic Demand'}:</span>
+          </span>
+          <div className="text-right flex items-center gap-1">
+            <span className="font-bold text-cyan-300 font-mono text-[13px]">{demand.toLocaleString()}</span>
+            <span className="text-[10px] text-slate-400">{isAr ? 'م.ر/س' : 'PCE/h'}</span>
+            <span
+              className={`text-[10px] font-mono px-1 py-0.2 rounded ${
+                vcRatio > 1.0 ? 'bg-rose-950 text-rose-300' : 'bg-slate-800 text-slate-300'
+              }`}
+            >
+              (v/c: {(vcRatio * 100).toFixed(0)}%)
+            </span>
+          </div>
+        </div>
+
+        {/* Workzone Capacity */}
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2.5 h-0.5 bg-rose-400" />
+            <span>{isAr ? 'سعة التحويلة المخفضة' : 'Work Zone Capacity'}:</span>
+          </span>
+          <div className="text-right flex items-center gap-1">
+            <span className="font-bold text-rose-400 font-mono text-[13px]">{cap.toLocaleString()}</span>
+            <span className="text-[10px] text-slate-400">{isAr ? 'م.ر/س' : 'PCE/h'}</span>
+            <span
+              className={`text-[10px] font-mono font-semibold ${
+                demand > cap ? 'text-rose-400' : 'text-emerald-400'
+              }`}
+            >
+              {demand > cap
+                ? `(-${(demand - cap).toLocaleString()})`
+                : `(+${(cap - demand).toLocaleString()})`}
+            </span>
+          </div>
+        </div>
+
+        {/* Queue Length */}
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="w-2.5 h-2.5 rounded-sm bg-amber-400" />
+            <span>{isAr ? 'امتداد الطابور التراكمي' : 'Queue Length'}:</span>
+          </span>
+          <div className="text-right flex items-center gap-1">
+            <span
+              className={`font-bold font-mono text-[13px] ${
+                queueM > 0 ? 'text-amber-400' : 'text-slate-400'
+              }`}
+            >
+              {queueM.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-slate-400">{isAr ? 'متر' : 'm'}</span>
+            {isSpillback && (
+              <span className="text-[9px] bg-rose-900/90 text-rose-200 border border-rose-500/50 px-1.5 py-0.5 rounded font-bold animate-pulse">
+                {isAr ? '🚨 ارتداد للمخرج' : '🚨 Spillback'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Delay */}
+        <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[11px]">
+          <span className="text-slate-400">
+            {isAr ? 'متوسط تأخير المركبة' : 'Avg Vehicle Delay'}:
+          </span>
+          <span className="font-semibold text-slate-300 font-mono">
+            {delaySec} {isAr ? 'ثانية/مركبة' : 's/veh'}
+            {personHours > 0 && (
+              <span className="text-slate-400 text-[10px] mr-1 ml-1 font-normal">
+                ({personHours.toLocaleString()} {isAr ? 'ساعة.شخص' : 'p-hrs'})
+              </span>
+            )}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
   corridorId,
@@ -108,6 +307,8 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       ? data.weekly_worst_window
       : data?.worst_window;
   const recommendedWindow = hasWeekly ? weeklyWindows[0] : data?.optimal_windows[0];
+  const dayOptimalWindow = data?.optimal_windows?.[0];
+  const requestedEnd = targetStartHour !== null ? (targetStartHour + durationHours) % 24 : null;
 
   const canvasWindow: WindowOption | null | undefined =
     data?.requested_window ?? data?.worst_window ?? activeWindows[0];
@@ -345,31 +546,51 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
       {/* 24-Hour Demand vs Capacity Chart */}
       {data && (
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <h3 className="text-sm font-bold text-slate-100">{t.wz_demand_vs_cap}</h3>
-            <div className="flex items-center gap-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                <span>{t.wz_demand_vs_cap}</span>
+                <span className="text-xs font-normal text-amber-400/90 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded">
+                  {daysLabels[dayOfWeek]}
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {isAr
+                  ? 'تحليل ديناميكي لساعات اليوم يوضح نافذة التنفيذ الآمنة مقارنة بفترات الذروة والتكدس'
+                  : 'Dynamic hourly profile highlighting safe maintenance windows vs peak congestion'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
               <span className="flex items-center gap-1.5 text-slate-300">
-                <span className="w-3 h-3 rounded-sm bg-cyan-500" />
+                <span className="w-3 h-3 rounded-sm bg-cyan-500 shadow-sm" />
                 {t.wz_demand_label}
               </span>
               <span className="flex items-center gap-1.5 text-slate-300">
                 <span className="w-3 h-0.5 bg-rose-500" />
-                {t.wz_capacity_label}
+                {t.wz_capacity_label} ({data.workzone_capacity.toLocaleString()})
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="w-3 h-3 rounded-sm bg-amber-500/80 shadow-sm" />
+                {t.wz_queue_label}
+              </span>
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <span className="w-3 h-3 rounded-sm bg-emerald-500/25 border border-emerald-500" />
+                {isAr ? 'نافذة الصيانة المثلى' : 'Optimal Window'}
               </span>
             </div>
           </div>
 
-          <div className="h-64 w-full">
+          <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={data.hourly_curves} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <AreaChart data={data.hourly_curves} margin={{ top: 15, right: 15, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="demandGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.6} />
+                    <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.55} />
                     <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0} />
                   </linearGradient>
                   <linearGradient id="queueGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.1} />
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.7} />
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.08} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -379,45 +600,257 @@ export const WorkZoneAdvisor: React.FC<WorkZoneAdvisorProps> = ({
                   tickFormatter={(h) => `${h.toString().padStart(2, '0')}:00`}
                   tick={{ fontSize: 11 }}
                 />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#090d16',
-                    borderColor: '#334155',
-                    borderRadius: '8px',
-                    fontSize: '12px',
+                <YAxis
+                  yAxisId="demand"
+                  stroke="#64748b"
+                  tick={{ fontSize: 11 }}
+                  domain={[0, 'auto']}
+                  label={{
+                    value: isAr ? 'م.ر/س' : 'PCE/h',
+                    angle: -90,
+                    position: 'insideLeft',
+                    fill: '#64748b',
+                    fontSize: 10,
                   }}
                 />
+                <YAxis
+                  yAxisId="queue"
+                  orientation="right"
+                  stroke="#f59e0b"
+                  tick={{ fontSize: 11 }}
+                  domain={[0, (dataMax: number) => Math.max(800, Math.ceil((dataMax || 600) * 1.3))]}
+                  tickFormatter={(v) => `${v}`}
+                  label={{
+                    value: isAr ? 'طول الطابور (م)' : 'Queue (m)',
+                    angle: 90,
+                    position: 'insideRight',
+                    fill: '#f59e0b',
+                    fontSize: 10,
+                  }}
+                />
+                <Tooltip
+                  content={(props: any) => (
+                    <WorkZoneCustomTooltip
+                      {...props}
+                      isAr={isAr}
+                      workzoneCapacity={data.workzone_capacity}
+                      upstreamExitDistanceM={600}
+                    />
+                  )}
+                />
+
+                {/* Optimal Window Highlight Band */}
+                {dayOptimalWindow && (
+                  dayOptimalWindow.start_hour < dayOptimalWindow.end_hour ? (
+                    <ReferenceArea
+                      yAxisId="demand"
+                      x1={dayOptimalWindow.start_hour}
+                      x2={dayOptimalWindow.end_hour}
+                      fill="#10b981"
+                      fillOpacity={0.16}
+                      stroke="#10b981"
+                      strokeOpacity={0.7}
+                      strokeDasharray="4 4"
+                      label={{
+                        value: isAr
+                          ? `نافذة الصيانة المثلى (${padHour(dayOptimalWindow.start_hour)}:00 - ${padHour(dayOptimalWindow.end_hour)}:00)`
+                          : `Optimal Window (${padHour(dayOptimalWindow.start_hour)}:00 - ${padHour(dayOptimalWindow.end_hour)}:00)`,
+                        position: 'insideTop',
+                        fill: '#34d399',
+                        fontSize: 11,
+                        fontWeight: 'bold',
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <ReferenceArea
+                        yAxisId="demand"
+                        x1={dayOptimalWindow.start_hour}
+                        x2={23}
+                        fill="#10b981"
+                        fillOpacity={0.16}
+                        stroke="#10b981"
+                        strokeOpacity={0.7}
+                        strokeDasharray="4 4"
+                      />
+                      <ReferenceArea
+                        yAxisId="demand"
+                        x1={0}
+                        x2={dayOptimalWindow.end_hour}
+                        fill="#10b981"
+                        fillOpacity={0.16}
+                        stroke="#10b981"
+                        strokeOpacity={0.7}
+                        strokeDasharray="4 4"
+                        label={{
+                          value: isAr
+                            ? `نافذة الصيانة المثلى (${padHour(dayOptimalWindow.start_hour)}:00 - ${padHour(dayOptimalWindow.end_hour)}:00)`
+                            : `Optimal Window (${padHour(dayOptimalWindow.start_hour)}:00 - ${padHour(dayOptimalWindow.end_hour)}:00)`,
+                          position: 'insideTop',
+                          fill: '#34d399',
+                          fontSize: 11,
+                          fontWeight: 'bold',
+                        }}
+                      />
+                    </>
+                  )
+                )}
+
+                {/* Requested Window Highlight Band (if different from optimal) */}
+                {targetStartHour !== null && requestedEnd !== null && targetStartHour !== dayOptimalWindow?.start_hour && (
+                  targetStartHour < requestedEnd ? (
+                    <ReferenceArea
+                      yAxisId="demand"
+                      x1={targetStartHour}
+                      x2={requestedEnd}
+                      fill="#38bdf8"
+                      fillOpacity={0.12}
+                      stroke="#38bdf8"
+                      strokeOpacity={0.7}
+                      strokeDasharray="4 4"
+                      label={{
+                        value: isAr
+                          ? `النافذة المطلوبة (${padHour(targetStartHour)}:00 - ${padHour(requestedEnd)}:00)`
+                          : `Requested Window (${padHour(targetStartHour)}:00 - ${padHour(requestedEnd)}:00)`,
+                        position: 'insideTop',
+                        fill: '#7dd3fc',
+                        fontSize: 10,
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <ReferenceArea
+                        yAxisId="demand"
+                        x1={targetStartHour}
+                        x2={23}
+                        fill="#38bdf8"
+                        fillOpacity={0.12}
+                        stroke="#38bdf8"
+                        strokeOpacity={0.7}
+                        strokeDasharray="4 4"
+                      />
+                      <ReferenceArea
+                        yAxisId="demand"
+                        x1={0}
+                        x2={requestedEnd}
+                        fill="#38bdf8"
+                        fillOpacity={0.12}
+                        stroke="#38bdf8"
+                        strokeOpacity={0.7}
+                        strokeDasharray="4 4"
+                        label={{
+                          value: isAr
+                            ? `النافذة المطلوبة (${padHour(targetStartHour)}:00 - ${padHour(requestedEnd)}:00)`
+                            : `Requested Window (${padHour(targetStartHour)}:00 - ${padHour(requestedEnd)}:00)`,
+                          position: 'insideTop',
+                          fill: '#7dd3fc',
+                          fontSize: 10,
+                        }}
+                      />
+                    </>
+                  )
+                )}
+
+                {/* Reduced Work Zone Capacity Line */}
                 <ReferenceLine
                   y={data.workzone_capacity}
+                  yAxisId="demand"
                   stroke="#ef4444"
                   strokeDasharray="4 4"
+                  strokeWidth={1.5}
                   label={{
-                    value: isAr ? `السعة: ${data.workzone_capacity}` : `Capacity: ${data.workzone_capacity}`,
+                    value: isAr ? `السعة المخفضة: ${data.workzone_capacity}` : `Reduced Cap: ${data.workzone_capacity}`,
                     fill: '#f87171',
                     fontSize: 11,
+                    position: 'insideBottomRight',
                   }}
                 />
+
+                {/* Upstream Exit Distance Threshold (600m) */}
+                <ReferenceLine
+                  y={600}
+                  yAxisId="queue"
+                  stroke="#fb7185"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  label={{
+                    value: isAr ? 'عتبة ارتداد المخرج السابق (600م)' : 'Upstream Exit Limit (600m)',
+                    fill: '#fb7185',
+                    fontSize: 10,
+                    position: 'insideTopRight',
+                  }}
+                />
+
+                {/* Demand Area */}
                 <Area
                   type="monotone"
                   dataKey="demand_pce"
+                  yAxisId="demand"
                   stroke="#06b6d4"
                   strokeWidth={2}
                   fillOpacity={1}
                   fill="url(#demandGrad)"
                   name={isAr ? 'الطلب (م.ر/س)' : 'Demand (PCE/h)'}
                 />
+
+                {/* Queue Length Area */}
                 <Area
                   type="monotone"
-                  dataKey="queue_veh"
-                  stroke="#f43f5e"
+                  dataKey="queue_length_m"
+                  yAxisId="queue"
+                  stroke="#f59e0b"
                   strokeWidth={2}
                   fillOpacity={1}
                   fill="url(#queueGrad)"
-                  name={isAr ? 'طابور التكدس (مركبة)' : 'Queue (veh)'}
+                  name={isAr ? 'طول الطابور (م)' : 'Queue length (m)'}
                 />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+
+          {/* Corridor Operational Profile Highlights */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-slate-800 text-xs">
+            <div className="flex items-start gap-2.5 bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-2.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <span>{isAr ? 'نافذة الصيانة الآمنة (00:00 - 05:00)' : 'Safe Window (00:00 - 05:00)'}</span>
+                </div>
+                <div className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                  {isAr
+                    ? 'طلب متدنٍ (< 2,500 م.ر/س)، سعة فائضة تفوق +3,100 م.ر/س، انعدام تام للطوابير (0م).'
+                    : 'Low demand (< 2,500 PCE/h), surplus capacity > +3,100 PCE/h, zero queue (0m).'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 bg-amber-950/20 border border-amber-500/30 rounded-xl p-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <span>{isAr ? 'ذروة الصباح (07:00 - 11:00)' : 'Morning Peak (07:00 - 11:00)'}</span>
+                </div>
+                <div className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                  {isAr
+                    ? 'طلب يفوق السعة (~7,200 م.ر/س)، تشكل طابور 600م يرتد للمخرج السابق. يمنع الإغلاق.'
+                    : 'Demand exceeds capacity (~7,200 PCE/h), 600m queue blocks upstream exit. Closure prohibited.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 bg-rose-950/20 border border-rose-500/30 rounded-xl p-2.5">
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                  <span>{isAr ? 'ذروة المساء (16:00 - 19:00)' : 'Evening Peak (16:00 - 19:00)'}</span>
+                </div>
+                <div className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                  {isAr
+                    ? 'أعلى حمل مروري (~7,500 م.ر/س)، عجز حرج في السعة (-1,860 م.ر/س) وشلل مروري تام.'
+                    : 'Highest traffic load (~7,500 PCE/h), severe capacity deficit (-1,860 PCE/h) and gridlock.'}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

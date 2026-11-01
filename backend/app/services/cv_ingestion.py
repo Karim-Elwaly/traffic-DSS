@@ -13,6 +13,7 @@ if str(_ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(_ROOT_DIR))
 
 from datetime import datetime, timezone
+import math
 from sqlmodel import Session, select
 from backend.app.models.domain import HourlyTelemetry, Corridor
 from backend.app.models.schemas import CVIngestRequest, CVIngestResponse
@@ -22,6 +23,29 @@ from backend.app.core.hcm_math import compute_pce_flow, compute_passenger_flow
 def _current_day_of_week(now: datetime) -> int:
     """Maps Python weekday (Monday=0) to the project's Sunday=0 convention."""
     return (now.weekday() + 1) % 7
+
+
+def _resolve_frame_time(timestamp_epoch: float | None) -> datetime:
+    """
+    Resolves the edge camera timestamp to a timezone-aware UTC datetime.
+
+    The original service always used ``datetime.now()``, which silently
+    re-assigned delayed or replayed camera frames to the current hour and
+    corrupted the live baseline. An invalid or non-finite epoch falls back to
+    wall-clock time rather than crashing the ingest webhook.
+    """
+    if timestamp_epoch is None:
+        return datetime.now(timezone.utc)
+    try:
+        epoch = float(timestamp_epoch)
+        if not math.isfinite(epoch) or epoch <= 0.0:
+            return datetime.now(timezone.utc)
+        # Accept both seconds and milliseconds since the Unix epoch.
+        if epoch > 1e11:
+            epoch /= 1000.0
+        return datetime.fromtimestamp(epoch, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError, TypeError):
+        return datetime.now(timezone.utc)
 
 
 def process_cv_feed(payload: CVIngestRequest, session: Session) -> CVIngestResponse:
@@ -41,7 +65,7 @@ def process_cv_feed(payload: CVIngestRequest, session: Session) -> CVIngestRespo
             message=f"Corridor '{payload.corridor_id}' not found.",
         )
 
-    now = datetime.now(timezone.utc)
+    now = _resolve_frame_time(payload.timestamp_epoch)
     day_of_week = _current_day_of_week(now)
     hour = now.hour
 

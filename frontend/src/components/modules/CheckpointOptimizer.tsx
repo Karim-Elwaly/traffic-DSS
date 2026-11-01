@@ -137,16 +137,16 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={600}
-            max={5000}
+            min={200}
+            max={8000}
             step={100}
             value={inboundFlow}
             onChange={(e) => setInboundFlow(Number(e.target.value))}
             className="w-full accent-emerald-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>600</span>
-            <span>5,000 veh/h</span>
+            <span>200</span>
+            <span>8,000 veh/h</span>
           </div>
         </div>
 
@@ -158,16 +158,16 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={4}
-            max={14}
+            min={2}
+            max={16}
             step={1}
             value={totalBooths}
             onChange={(e) => setTotalBooths(Number(e.target.value))}
             className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>4</span>
-            <span>14 booths</span>
+            <span>2</span>
+            <span>16 booths</span>
           </div>
         </div>
 
@@ -228,7 +228,7 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           <input
             type="range"
             min={0}
-            max={40}
+            max={50}
             step={2}
             value={heavyPct}
             onChange={(e) => setHeavyPct(Number(e.target.value))}
@@ -236,7 +236,7 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           />
           <div className="flex justify-between text-[10px] text-slate-500">
             <span>0%</span>
-            <span>40%</span>
+            <span>50%</span>
           </div>
         </div>
 
@@ -249,7 +249,7 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           <input
             type="range"
             min={30}
-            max={180}
+            max={600}
             step={10}
             value={targetMaxWait}
             onChange={(e) => setTargetMaxWait(Number(e.target.value))}
@@ -257,7 +257,7 @@ ${data.booth_allocation_en.map((b, i) => `${i + 1}. ${b}`).join('\n')}`;
           />
           <div className="flex justify-between text-[10px] text-slate-500">
             <span>30s</span>
-            <span>180s (Bypass)</span>
+            <span>600s</span>
           </div>
         </div>
       </div>

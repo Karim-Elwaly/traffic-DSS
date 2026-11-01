@@ -85,7 +85,7 @@ export const translations = {
     wz_demand_vs_cap: "24-Hour Demand vs. Work-Zone Capacity Profile",
     wz_demand_label: "Hourly PCE Demand",
     wz_capacity_label: "Reduced Capacity",
-    wz_queue_label: "Accumulated Queue (veh)",
+    wz_queue_label: "Accumulated Queue Length (m)",
     wz_person_hours: "Total Person-Hours of Delay (PHD)",
     wz_spillback_detected: "CRITICAL: Queue will spill back into upstream exit!",
 
@@ -239,7 +239,7 @@ export const translations = {
     wz_demand_vs_cap: "منحنى الطلب المروري مقابل السعة خلال 24 ساعة",
     wz_demand_label: "حجم الطلب (م.ر/س)",
     wz_capacity_label: "السعة المخفضة لمنطقة العمل",
-    wz_queue_label: "الطابور التراكمي المتولد (مركبة)",
+    wz_queue_label: "امتداد الطابور التراكمي (متر)",
     wz_person_hours: "إجمالي ساعات التأخير البشري (PHD)",
     wz_spillback_detected: "تحذير حرج: طابور المركبات سيمتد ليغلق المخرج السابق للمحور!",
 

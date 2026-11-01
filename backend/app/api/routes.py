@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from backend.app.database import get_session
 from backend.app.models.domain import Corridor, HourlyTelemetry
+from backend.app.services.synthetic_seeder import seed_corridors_and_telemetry
 from backend.app.models.schemas import (
     CorridorSummary,
     CorridorTelemetryResponse,
@@ -186,6 +187,7 @@ def optimize_workzone(
     payload: WorkZoneRequest,
     session: Session = Depends(get_session),
 ):
+    seed_corridors_and_telemetry(session)
     corridor = session.get(Corridor, payload.corridor_id)
     if not corridor:
         raise HTTPException(status_code=404, detail=f"Corridor '{payload.corridor_id}' not found.")

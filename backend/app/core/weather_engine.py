@@ -60,13 +60,26 @@ def evaluate_weather_protocol(req: WeatherRequest) -> WeatherResponse:
 
     deficit = max(0.0, ssd_truck - req.visibility_m)
 
+    # ------------------------------------------------------------------
     # Pileup Risk Index (0 - 100%)
-    if ssd_truck > req.visibility_m:
-        pileup_risk = max(5.0, min(100.0, ((ssd_truck - req.visibility_m) / max(1.0, ssd_truck)) * 100.0))
-    else:
-        pileup_risk = 8.0
+    # ------------------------------------------------------------------
+    # Risk has two independent drivers: how little the driver can see, and how
+    # far the truck needs to stop compared with that visibility. Using a floor
+    # of 8% and then labelling a sub-40 m fog as CRITICAL contradicted itself.
+    visibility_component = max(
+        0.0, min(100.0, (150.0 - req.visibility_m) / 150.0 * 100.0)
+    )
+    stopping_component = max(
+        0.0, min(100.0, deficit / max(1.0, ssd_truck) * 100.0)
+    )
+    pileup_risk = max(visibility_component, stopping_component)
+    if req.visibility_m < 40.0:
+        pileup_risk = max(pileup_risk, 90.0)
+    pileup_risk = max(3.0, min(100.0, pileup_risk))
 
+    # ------------------------------------------------------------------
     # 3-Tier Automated Protocol Escalation
+    # ------------------------------------------------------------------
     if req.visibility_m < 40.0:
         protocol_tier = "TIER 3: MANDATORY CORRIDOR GATE CLOSURE"
         pacing_required = True
@@ -78,7 +91,9 @@ def evaluate_weather_protocol(req: WeatherRequest) -> WeatherResponse:
     elif ssd_truck > req.visibility_m:
         protocol_tier = "TIER 2: PATROL-LED CONVOY PACING (تفويج مروري)"
         pacing_required = True
-        risk_level = "HIGH" if deficit > 35.0 else "MODERATE"
+        risk_level = (
+            "HIGH" if deficit > 35.0 or pileup_risk >= 60.0 else "MODERATE"
+        )
         convoy_speed = min(40.0, max(30.0, safe_speed))
         lead_vehicles = 2 if req.traffic_flow_pce > 3000 else 1
         vms_en = f"SEVERE FOG: SPEED {int(safe_speed)} KM/H - PATROL CONVOY PACING ACTIVE - ZERO OVERTAKING"
@@ -86,7 +101,7 @@ def evaluate_weather_protocol(req: WeatherRequest) -> WeatherResponse:
     else:
         protocol_tier = "TIER 1: VMS VARIABLE SPEED LIMIT & FOG BEACONS"
         pacing_required = False
-        risk_level = "LOW"
+        risk_level = "LOW" if pileup_risk < 40.0 else "MODERATE"
         convoy_speed = safe_speed
         lead_vehicles = 0
         vms_en = f"FOG ADVISORY: SPEED {int(safe_speed)} KM/H - MAINTAIN SAFE HEADWAY"

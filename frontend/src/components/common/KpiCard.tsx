@@ -1,5 +1,8 @@
 import React from 'react';
 
+type KpiStatus = 'normal' | 'warning' | 'critical' | 'success' | 'info' | 'optimal';
+type KpiVariant = 'success' | 'warning' | 'danger' | 'neutral' | 'info' | 'critical' | 'optimal';
+
 interface KpiCardProps {
   title: string;
   value: string | number;
@@ -8,37 +11,72 @@ interface KpiCardProps {
     value: number;
     isGood: boolean;
   };
-  status?: 'normal' | 'warning' | 'critical' | 'success' | 'info' | 'optimal';
+  status?: KpiStatus;
+  /** Shorthand for the module KPI palette. Ignored when `status` is supplied. */
+  variant?: KpiVariant;
+  /** Optional Tailwind border class that overrides the status border colour. */
+  accent?: string;
   los?: string;
   icon?: React.ReactNode;
   description?: string;
   subtitle?: string;
 }
 
+const VARIANT_STATUS: Record<KpiVariant, KpiStatus> = {
+  success: 'success',
+  warning: 'warning',
+  danger: 'critical',
+  critical: 'critical',
+  neutral: 'normal',
+  info: 'info',
+  optimal: 'optimal',
+};
+
 export const KpiCard: React.FC<KpiCardProps> = ({
   title,
   value,
   unit,
   delta,
-  status = 'normal',
+  status,
+  variant,
+  accent,
   los,
   icon,
   description,
   subtitle,
 }) => {
-  const getStatusStyles = () => {
-    switch (status) {
+  const resolvedStatus: KpiStatus =
+    status ?? (variant ? VARIANT_STATUS[variant] : 'normal');
+
+  const getStatusTone = () => {
+    switch (resolvedStatus) {
       case 'success':
       case 'optimal':
-        return 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400';
+        return 'bg-emerald-950/20 text-emerald-400';
       case 'warning':
-        return 'border-amber-500/30 bg-amber-950/20 text-amber-400';
+        return 'bg-amber-950/20 text-amber-400';
       case 'critical':
-        return 'border-rose-500/30 bg-rose-950/20 text-rose-400';
+        return 'bg-rose-950/20 text-rose-400';
       case 'info':
-        return 'border-cyan-500/30 bg-cyan-950/20 text-cyan-400';
+        return 'bg-cyan-950/20 text-cyan-400';
       default:
-        return 'border-slate-800 bg-slate-900/90 text-cyan-400';
+        return 'bg-slate-900/90 text-cyan-400';
+    }
+  };
+
+  const getStatusBorder = () => {
+    switch (resolvedStatus) {
+      case 'success':
+      case 'optimal':
+        return 'border-emerald-500/30';
+      case 'warning':
+        return 'border-amber-500/30';
+      case 'critical':
+        return 'border-rose-500/30';
+      case 'info':
+        return 'border-cyan-500/30';
+      default:
+        return 'border-slate-800';
     }
   };
 
@@ -59,7 +97,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({
   };
 
   return (
-    <div className={`p-4 rounded-xl border shadow-lg backdrop-blur-sm transition-all hover:border-slate-700 ${getStatusStyles()}`}>
+    <div className={`p-4 rounded-xl border shadow-lg backdrop-blur-sm transition-all hover:border-slate-700 ${accent ?? getStatusBorder()} ${getStatusTone()}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{title}</span>
         {icon && <span className="text-slate-400">{icon}</span>}

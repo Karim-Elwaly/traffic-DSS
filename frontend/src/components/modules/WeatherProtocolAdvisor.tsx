@@ -139,16 +139,16 @@ ${data.police_sop_actions_en.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={15}
-            max={350}
+            min={10}
+            max={2000}
             step={5}
             value={visibilityM}
             onChange={(e) => setVisibilityM(Number(e.target.value))}
             className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>15m ({isAr ? 'شبورة معتمة' : 'Dense'})</span>
-            <span>350m ({isAr ? 'واضحة' : 'Clear'})</span>
+            <span>10m ({isAr ? 'شبورة معتمة' : 'Dense'})</span>
+            <span>2,000m ({isAr ? 'واضحة' : 'Clear'})</span>
           </div>
         </div>
 
@@ -163,7 +163,7 @@ ${data.police_sop_actions_en.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={40}
+            min={30}
             max={120}
             step={5}
             value={currentSpeedKmh}
@@ -171,7 +171,7 @@ ${data.police_sop_actions_en.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
             className="w-full accent-rose-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>40 km/h</span>
+            <span>30 km/h</span>
             <span>120 km/h</span>
           </div>
         </div>
@@ -185,6 +185,8 @@ ${data.police_sop_actions_en.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
             {[
               { id: 'dry', labelEn: 'Dry', labelAr: 'جاف' },
               { id: 'wet', labelEn: 'Wet', labelAr: 'ممطر' },
+              { id: 'first_rain_slick', labelEn: 'First Rain', labelAr: 'مطر أول' },
+              { id: 'sandstorm', labelEn: 'Sandstorm', labelAr: 'عاصفة رملية' },
               { id: 'fog_slick', labelEn: 'Fog Slick', labelAr: 'شبورة زلقة' },
             ].map((cond) => (
               <button
@@ -239,16 +241,16 @@ ${data.police_sop_actions_en.map((a, i) => `${i + 1}. ${a}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={1000}
-            max={7500}
+            min={500}
+            max={9000}
             step={250}
             value={trafficFlowPce}
             onChange={(e) => setTrafficFlowPce(Number(e.target.value))}
             className="w-full accent-emerald-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>1,000</span>
-            <span>7,500 PCE/h</span>
+            <span>500</span>
+            <span>9,000 PCE/h</span>
           </div>
         </div>
       </div>

@@ -18,8 +18,16 @@ engine = create_engine(
 
 
 def get_session():
-    """FastAPI dependency / context-manager factory for database sessions."""
-    return Session(engine)
+    """
+    FastAPI dependency that yields a session and always closes it.
+
+    Returning a bare ``Session`` from a dependency leaks a pooled connection
+    because FastAPI only runs teardown for generator dependencies. After five
+    leaked sessions the SQLite pool is exhausted and every DB-backed request
+    blocks for the 30 s pool timeout.
+    """
+    with Session(engine) as session:
+        yield session
 
 
 def create_db_and_tables() -> None:

@@ -117,16 +117,16 @@ ${data.sop_directives_en.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={2500}
-            max={7200}
+            min={2000}
+            max={7500}
             step={100}
             value={mainlineFlow}
             onChange={(e) => setMainlineFlow(Number(e.target.value))}
             className="w-full accent-sky-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>2,500</span>
-            <span>7,200 PCE/h</span>
+            <span>2,000</span>
+            <span>7,500 PCE/h</span>
           </div>
         </div>
 
@@ -138,16 +138,16 @@ ${data.sop_directives_en.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={300}
-            max={2000}
+            min={200}
+            max={2200}
             step={50}
             value={rampDemand}
             onChange={(e) => setRampDemand(Number(e.target.value))}
             className="w-full accent-emerald-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>300</span>
-            <span>2,000 PCE/h</span>
+            <span>200</span>
+            <span>2,200 PCE/h</span>
           </div>
         </div>
 

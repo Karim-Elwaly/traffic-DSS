@@ -54,6 +54,7 @@ export const DiversionBalancer: React.FC<DiversionBalancerProps> = ({ language }
         primary_capacity_vph: primaryCap,
         alternate_corridor_name: alternateName,
         alternate_free_flow_time_min: alternateT0,
+        alternate_capacity_vph: alternateCap,
         incident_delay_factor: incidentFactor,
       });
       setData(res);
@@ -156,16 +157,16 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           </div>
           <input
             type="range"
-            min={3000}
-            max={11000}
+            min={1000}
+            max={12000}
             step={250}
             value={totalDemand}
             onChange={(e) => setTotalDemand(Number(e.target.value))}
             className="w-full accent-emerald-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>3,000</span>
-            <span>11,000 veh/h</span>
+            <span>1,000</span>
+            <span>12,000 veh/h</span>
           </div>
         </div>
 
@@ -181,7 +182,7 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           <input
             type="range"
             min={1.0}
-            max={2.5}
+            max={3.0}
             step={0.1}
             value={incidentFactor}
             onChange={(e) => setIncidentFactor(Number(e.target.value))}
@@ -189,7 +190,7 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           />
           <div className="flex justify-between text-[10px] text-slate-500">
             <span>x1.0 ({isAr ? 'طبيعي' : 'Normal'})</span>
-            <span>x2.5 ({isAr ? 'حادث جسيم' : 'Major Crash'})</span>
+            <span>x3.0 ({isAr ? 'حادث جسيم' : 'Major Crash'})</span>
           </div>
         </div>
 
@@ -201,16 +202,16 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           </div>
           <input
             type="range"
-            min={3000}
-            max={7000}
+            min={1000}
+            max={8000}
             step={200}
             value={primaryCap}
             onChange={(e) => setPrimaryCap(Number(e.target.value))}
             className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>3,000</span>
-            <span>7,000 veh/h</span>
+            <span>1,000</span>
+            <span>8,000 veh/h</span>
           </div>
         </div>
 
@@ -222,7 +223,7 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           </div>
           <input
             type="range"
-            min={3000}
+            min={1000}
             max={8000}
             step={200}
             value={alternateCap}
@@ -230,7 +231,7 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
             className="w-full accent-amber-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>3,000</span>
+            <span>1,000</span>
             <span>8,000 veh/h</span>
           </div>
         </div>
@@ -243,16 +244,16 @@ VMS Broadcast Message: ${data.vms_advisory_en}`;
           </div>
           <input
             type="range"
-            min={10}
-            max={30}
+            min={5}
+            max={60}
             step={1}
             value={primaryT0}
             onChange={(e) => setPrimaryT0(Number(e.target.value))}
             className="w-full accent-slate-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>10 min</span>
-            <span>30 min</span>
+            <span>5 min</span>
+            <span>60 min</span>
           </div>
         </div>
       </div>

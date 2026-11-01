@@ -127,16 +127,16 @@ ${data.gate_playbook_en.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={1500}
-            max={9000}
+            min={500}
+            max={15000}
             step={250}
             value={surgeVehicles}
             onChange={(e) => setSurgeVehicles(Number(e.target.value))}
             className="w-full accent-purple-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>1,500</span>
-            <span>9,000 veh</span>
+            <span>500</span>
+            <span>15,000 veh</span>
           </div>
         </div>
 
@@ -148,16 +148,16 @@ ${data.gate_playbook_en.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
           </div>
           <input
             type="range"
-            min={2000}
-            max={5500}
+            min={1000}
+            max={7000}
             step={250}
             value={baseFlow}
             onChange={(e) => setBaseFlow(Number(e.target.value))}
             className="w-full accent-cyan-400 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[10px] text-slate-500">
-            <span>2,000</span>
-            <span>5,500 PCE/h</span>
+            <span>1,000</span>
+            <span>7,000 PCE/h</span>
           </div>
         </div>
 

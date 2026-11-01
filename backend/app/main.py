@@ -17,6 +17,7 @@ for _p in (str(_ROOT_DIR), str(_BACKEND_DIR)):
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
 from backend.app.api.routes import router as api_router
 from backend.app.database import create_db_and_tables, engine, get_session
@@ -27,7 +28,7 @@ from backend.app.services.synthetic_seeder import seed_corridors_and_telemetry
 async def lifespan(app: FastAPI):
     # Startup: create tables and seed synthetic Egyptian corridor data
     create_db_and_tables()
-    with get_session() as session:
+    with Session(engine) as session:
         seed_corridors_and_telemetry(session)
     yield
     # Shutdown logic (if any)

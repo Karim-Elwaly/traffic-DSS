@@ -891,8 +891,14 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         const incX = TAPER_END_M * PX_PER_M;
         const incType = incidentTypeRef.current || 'COLLISION';
         const wKmh = shockwaveSpeedRef.current || 16.0;
-        const waveTravelM = (simClock * (wKmh / 3.6) * 1.5) % Math.max(100, storageM * 0.9);
-        const waveFrontM = Math.max(10, TAPER_END_M - waveTravelM);
+        // The front travels upstream at exactly the reported wave speed. It
+        // stops at the upstream exit instead of looping, because the queue can
+        // no longer grow once it has blocked the exit.
+        const waveTravelM = Math.min(
+          TAPER_END_M - 25,
+          simClock * (wKmh / 3.6)
+        );
+        const waveFrontM = Math.max(25, TAPER_END_M - waveTravelM);
         const waveFrontX = waveFrontM * PX_PER_M;
 
         // Backward shockwave crimson zone
@@ -968,6 +974,12 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         const upSpd = upVehs.length > 0 ? (upVehs.reduce((a, b) => a + b.speed, 0) / upVehs.length) * 3.6 : speedLimitKmh;
         const downSpd = downVehs.length > 0 ? (downVehs.reduce((a, b) => a + b.speed, 0) / downVehs.length) * 3.6 : (isOpen(1) ? speedLimitKmh : workzoneSpeedKmh);
 
+        // Virtual-loop flow from the fundamental relation q = k * v. The probe
+        // window is 40 m long and covers all four lanes, so the total density
+        // is n / 0.04 veh/km and q is in veh/h.
+        const upFlow = Math.round((upVehs.length / 0.04) * upSpd);
+        const downFlow = Math.round((downVehs.length / 0.04) * downSpd);
+
         ctx.save();
         ctx.font = 'bold 9px JetBrains Mono, monospace';
 
@@ -983,9 +995,9 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        const upTxt = `📡 RADAR 1: ${Math.round(upSpd)} km/h`;
+        const upTxt = `📡 RADAR 1: ${Math.round(upSpd)} km/h · ${upFlow.toLocaleString()} veh/h`;
         const upMetrics = ctx.measureText(upTxt);
-        const upW = Math.max(120, Math.ceil(upMetrics.width) + 16);
+        const upW = Math.max(150, Math.ceil(upMetrics.width) + 16);
         const upH = 20;
         const upX = rxUp - upW / 2;
         const upY = roadBottom + 6;
@@ -1014,9 +1026,9 @@ export const HighwayCanvas: React.FC<HighwayCanvasProps> = ({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        const downTxt = `📡 RADAR 2: ${Math.round(downSpd)} km/h`;
+        const downTxt = `📡 RADAR 2: ${Math.round(downSpd)} km/h · ${downFlow.toLocaleString()} veh/h`;
         const downMetrics = ctx.measureText(downTxt);
-        const downW = Math.max(120, Math.ceil(downMetrics.width) + 16);
+        const downW = Math.max(150, Math.ceil(downMetrics.width) + 16);
         const downH = 20;
         const downX = rxDown - downW / 2;
         const downY = roadBottom + 6;
